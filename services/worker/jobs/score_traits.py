@@ -35,6 +35,29 @@ Biography:
 Return only JSON.
 """.strip()
 
+def _call_chat(base, model, messages, opts):
+    # Try /api/chat first
+    resp = httpx.post(
+        f"{base}/api/chat",
+        json={"model": model, "messages": messages, "options": opts, "stream": False},
+        timeout=180,
+    )
+    if resp.status_code == 404:
+        # Fall back to /api/generate by composing a single prompt
+        user_parts = [m["content"] for m in messages if m["role"] == "user"]
+        prompt = (SYSTEM_PROMPT + "\n\n" + "\n\n".join(user_parts)).strip()
+        resp = httpx.post(
+            f"{base}/api/generate",
+            json={"model": model, "prompt": prompt, "options": opts, "stream": False},
+            timeout=180,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        return payload.get("response", "")
+    resp.raise_for_status()
+    payload = resp.json()
+    return payload.get("message", {}).get("content", "")
+
 def score_traits_bio(bio_text: str) -> dict:
     base = os.getenv("TRAIT_LLM_BASE_URL", "http://local-llm:11434")
     model = os.getenv("TRAIT_LLM_MODEL", "qwen2.5:7b-instruct-q4_K_M")
@@ -42,21 +65,13 @@ def score_traits_bio(bio_text: str) -> dict:
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": build_trait_prompt(bio_text)},
     ]
-    opts = {
-        "temperature": 0.1,      # better JSON discipline
-        "num_ctx": 4096,         # context length
-        "repeat_penalty": 1.05,  # tame repetition
-    }
+    opts = {"temperature": 0.1, "num_ctx": 4096, "repeat_penalty": 1.05}
 
-    def call(messages):
-        r = httpx.post(f"{base}/api/chat", json={"model": model, "messages": messages, "options": opts, "stream": False}, timeout=180)
-        r.raise_for_status()
-        return r.json()["message"]["content"]
-
-    content = call(messages)
+    content = _call_chat(base, model, messages, opts)
     try:
         return json.loads(content)
     except json.JSONDecodeError:
+        # Retry once with a stricter instruction
         messages.append({"role": "system", "content": "Your last output was not valid JSON. Return strict JSON matching the schema only."})
-        content = call(messages)
+        content = _call_chat(base, model, messages, opts)
         return json.loads(content)
