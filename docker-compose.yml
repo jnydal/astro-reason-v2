@@ -1,0 +1,126 @@
+x-env: &default-env
+  ENV: "dev"
+  TZ: "Europe/Oslo"
+
+services:
+  local-llm:
+    image: ollama/ollama:latest
+    ports:
+      - "8001:11434"          # host:container
+    volumes:
+      - ollama:/root/.ollama  # cache models
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  api:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    env_file: ./.env
+    environment:
+      <<: *default-env
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET_RAW: astro-raw
+      MINIO_BUCKET_REPORTS: astro-reports
+      OPENAI_API_KEY: ${OPENAI_API_KEY}   # or your LLM provider
+    depends_on:
+      - db
+      - redis
+      - minio
+    ports:
+      - "8080:8080"
+
+  worker:
+    build:
+      context: ./services/worker
+      dockerfile: Dockerfile
+    env_file: ./.env
+    environment:
+      <<: *default-env
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET_RAW: astro-raw
+      MINIO_BUCKET_REPORTS: astro-reports
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-bge-large}
+      TRAIT_LLM_PROVIDER: ollama
+      TRAIT_LLM_BASE_URL: http://local-llm:11434
+      TRAIT_LLM_MODEL: qwen2.5:7b-instruct-q4_K_M
+    depends_on:
+      - db
+      - redis
+      - minio
+      - local-llm
+
+  # Postgres with pgvector extension baked in
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-astro_reason}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+      TZ: "Europe/Oslo"
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./infra/sql:/docker-entrypoint-initdb.d
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: quay.io/minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio123}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+
+  # Optional: lightweight embedding service if you want local embeddings
+  embeddings:
+    build:
+      context: ./services/embeddings
+      dockerfile: Dockerfile
+    env_file: ./.env
+    environment:
+      <<: *default-env
+    ports:
+      - "8090:8090"
+    deploy:
+      replicas: 1
+    depends_on:
+      - redis
+
+volumes:
+  db_data:
+  minio_data:
+  ollama:
