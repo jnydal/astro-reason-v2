@@ -152,40 +152,8 @@ Expected: valid JSON Burlan scoring.
    - Embeddings
    - Burlan vectors
    - Astro encoding
-4. Explore correlations:
-   - Heatmaps
-   - Nearest-neighbor similarity
-   - Dominant vector distributions
-   - UMAP plots (embedding clusters)
 
 Each processing step logs a provenance record for reproducibility.
-
----
-
-## Frontend (React)
-
-Planned UI modules:
-
-- Upload + job control
-- Person directory + detail pages
-- Dominant vector dashboards
-- Correlation workbench (Burlan vs Astro features)
-- Embedding similarity explorer
-
----
-
-## Current Status
-
-✅ Local LLM inference operational  
-✅ Embedding pipeline architecture defined  
-✅ Astro encoding defined  
-✅ DB schema stable  
-✅ MVP React UI in planning
-
-Next:
-- Full batch processing of research datasets  
-- Correlation visualizations and exports  
-- Frontend user flow completion
 
 ---
 
