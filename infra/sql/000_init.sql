@@ -72,3 +72,19 @@ CREATE TABLE provenance_event (
   detail JSONB,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Burlan vectors scoring results
+CREATE TABLE nlp_vectors (
+  id BIGSERIAL PRIMARY KEY,
+  person_id UUID NOT NULL REFERENCES person_raw(id) ON DELETE CASCADE,
+  vectors JSONB NOT NULL,        -- {"sound":6, "visual":4, ...}
+  dominant TEXT[] NOT NULL,      -- ["sound","visual"]
+  confidence DOUBLE PRECISION NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+  model_name TEXT NOT NULL,      -- e.g. "qwen2.5:7b-instruct-q4_K_M"
+  provider TEXT NOT NULL,        -- "ollama"
+  temperature DOUBLE PRECISION NOT NULL,
+  prompt_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_nlp_vectors_person ON nlp_vectors(person_id);
