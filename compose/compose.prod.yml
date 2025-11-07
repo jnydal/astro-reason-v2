@@ -1,25 +1,26 @@
 services:
-  api:
+  resolver:
     build:
       context: .
-      dockerfile: docker/api.Dockerfile
-    ports: ["8000:8000"]
-    depends_on: [postgres, redis, minio]
+      dockerfile: service/resolver/Dockerfile
+    environment:
+      PG_DSN: postgresql://postgres:postgres@db:5432/astro_reason
+    depends_on: [db, redis]
 
   ingest:
     build:
       context: .
-      dockerfile: docker/ingest.Dockerfile
-    depends_on: [postgres, redis, minio]
-
-  resolver:
-    build:
-      context: .
-      dockerfile: docker/resolver.Dockerfile
-    depends_on: [postgres, redis]
+      dockerfile: service/ingest/Dockerfile
+    environment:
+      PG_DSN: postgresql://postgres:postgres@db:5432/astro_reason
+      MINIO_ENDPOINT: http://minio:9000
+    depends_on: [db, minio, redis]
 
   astro:
     build:
       context: .
-      dockerfile: docker/worker-astro.Dockerfile
-    depends_on: [postgres, redis]
+      dockerfile: service/astro/Dockerfile
+    environment:
+      PG_DSN: postgresql://postgres:postgres@db:5432/astro_reason
+      SE_EPHE_PATH: /opt/ephe
+    depends_on: [db, redis]

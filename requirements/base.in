@@ -1,5 +1,5 @@
 fastapi
 pydantic
-psycopg[binary]
+psycopg2-binary
 redis
 
