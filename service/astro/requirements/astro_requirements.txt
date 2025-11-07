@@ -1,3 +1,6 @@
+# requirements/astro.txt
+psycopg[binary]
+numpy
 pyswisseph
 skyfield
 jplephem

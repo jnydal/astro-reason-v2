@@ -1,0 +1,3 @@
+# requirements/resolver.txt
+psycopg[binary]
+requests

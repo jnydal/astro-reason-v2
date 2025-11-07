@@ -1,0 +1,4 @@
+# requirements/embeddings.txt
+psycopg[binary]
+numpy
+sentence-transformers

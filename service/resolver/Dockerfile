@@ -1,5 +1,13 @@
-FROM base AS resolver
-COPY requirements/resolver.txt requirements/constraints.txt ./requirements/
-RUN pip install -r requirements/resolver.txt -c requirements/constraints.txt
-CMD ["python", "-m", "app.workers.resolver"]
-
+FROM python:3.11-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY requirements/base.txt requirements/constraints.txt ./requirements/
+RUN pip install --upgrade pip && \
+    pip install -r requirements/base.txt -c requirements/constraints.txt && \
+    pip install -r ./requirements/resolver_requirements.txt -c requirements/constraints.txt
+COPY . .
+ENV PYTHONPATH=/app/service:/app
+CMD ["python", "-m", "service.resolver.app.resolve_qid"]

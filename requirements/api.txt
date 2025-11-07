@@ -1,0 +1,7 @@
+# requirements/api.txt
+fastapi
+uvicorn
+pydantic
+redis
+psycopg[binary]
+sqlalchemy

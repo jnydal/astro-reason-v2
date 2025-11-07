@@ -1,0 +1,5 @@
+# requirements/constraints.txt
+# Pin to your compiled base; use this as a constraints cap for services.
+# If you like, you can simply duplicate base.txt here to start.
+# (You can later run pip-compile to maintain strict pins.)
+-r base.txt

@@ -17,7 +17,7 @@ services:
 
   api:
     build:
-      context: ./services/api
+      context: ./service/api
       dockerfile: Dockerfile
     env_file: ./.env
     environment:
@@ -39,7 +39,7 @@ services:
 
   worker:
     build:
-      context: ./services/worker
+      context: ./service/traits
       dockerfile: Dockerfile
     env_file: ./.env
     environment:
@@ -108,7 +108,7 @@ services:
   # Optional: lightweight embedding service if you want local embeddings
   embeddings:
     build:
-      context: ./services/embeddings
+      context: ./service/embeddings
       dockerfile: Dockerfile
     env_file: ./.env
     environment:

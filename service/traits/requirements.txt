@@ -1,0 +1,3 @@
+# requirements/traits.txt
+httpx
+psycopg[binary]
