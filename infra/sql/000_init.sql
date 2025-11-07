@@ -29,6 +29,8 @@ CREATE TABLE entity_link (
 CREATE TABLE bio_text (
   person_id UUID REFERENCES person_raw(id) ON DELETE CASCADE,
   qid TEXT,
+  text TEXT,
+  text_sha256 TEXT,
   lang TEXT,
   wiki_pageid BIGINT,
   rev_id BIGINT,

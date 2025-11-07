@@ -25,8 +25,11 @@ def run(dsn, lang="en"):
     rows = cur.fetchall()
     wrote = 0
     for r in rows:
-        title = sitelink(r["qid"], lang); if not title: continue
-        rev, wt = fetch_latest_wikitext(lang, title); if not wt: continue
+        title = sitelink(r["qid"], lang)
+        if not title:
+            continue
+        rev, wt = fetch_latest_wikitext(lang, title)
+        if not wt: continue
         text = clean_wikitext(wt)
         if not text: continue
         cur.execute("""
