@@ -1,0 +1,18 @@
+# Core test framework
+pytest>=8.0
+pytest-cov>=5.0
+
+# HTTP and integration helpers
+requests>=2.32
+pytest-asyncio>=0.23
+
+# Mocking and stubbing
+pytest-mock>=3.14
+responses>=0.25    # for mocking HTTP calls if needed
+
+# Type checking & linting (optional but useful in CI)
+mypy>=1.11
+flake8>=7.1
+
+# Optional utilities
+python-dotenv>=1.0    # to load .env test configs

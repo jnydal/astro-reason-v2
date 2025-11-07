@@ -1,0 +1,43 @@
+# docker-compose.test.yml (overlay)
+services:
+  astro:
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+
+  resolver:
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+
+  ingest:
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+
+  tests:
+    build:
+      context: .
+      dockerfile: docker/test.Dockerfile
+    depends_on:
+      astro:
+        condition: service_healthy
+      resolver:
+        condition: service_healthy
+      ingest:
+        condition: service_healthy
+    environment:
+      ASTRO_URL:    http://astro:8080
+      RESOLVER_URL: http://resolver:8080
+      INGEST_URL:   http://ingest:8080
+      # add DB / MinIO / Redis URLs if your tests touch them
+      # DATABASE_URL: postgres://postgres:postgres@db:5432/postgres
+      # MINIO_ENDPOINT: http://minio:9000
+    command: >
+      pytest -q -m "unit or integration"
