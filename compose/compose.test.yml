@@ -1,0 +1,25 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    ports: ["8000:8000"]
+    depends_on: [postgres, redis, minio]
+
+  ingest:
+    build:
+      context: .
+      dockerfile: docker/ingest.Dockerfile
+    depends_on: [postgres, redis, minio]
+
+  resolver:
+    build:
+      context: .
+      dockerfile: docker/resolver.Dockerfile
+    depends_on: [postgres, redis]
+
+  astro:
+    build:
+      context: .
+      dockerfile: docker/worker-astro.Dockerfile
+    depends_on: [postgres, redis]

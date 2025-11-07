@@ -50,21 +50,6 @@ CREATE TABLE nlp_traits (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- pgvector column for embeddings
-CREATE TABLE embeddings (
-  person_id UUID PRIMARY KEY REFERENCES person_raw(id) ON DELETE CASCADE,
-  model TEXT,
-  dim INT,
-  vec VECTOR(1536),
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE astro_features (
-  person_id UUID PRIMARY KEY REFERENCES person_raw(id) ON DELETE CASCADE,
-  features JSONB,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
 CREATE TABLE provenance_event (
   id BIGSERIAL PRIMARY KEY,
   person_id UUID REFERENCES person_raw(id) ON DELETE CASCADE,

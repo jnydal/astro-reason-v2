@@ -1,0 +1,17 @@
+name: astro-worker
+on: [push, pull_request]
+jobs:
+  test-astro:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/test.Dockerfile
+          push: false
+          load: true
+          tags: astro-test:ci
+      - name: Run astro tests
+        run: docker run --rm astro-test:ci
