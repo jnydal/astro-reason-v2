@@ -11,6 +11,7 @@ import psycopg2.extras
 # - OpenAI API if you ever use cloud
 from sentence_transformers import SentenceTransformer
 
+# depricated, or not really neccesarry anymore as replaced by RQ based jobs.py
 
 def embed_texts(texts: list[str], model_name: str) -> np.ndarray:
     """Batch encode texts into vectors."""
