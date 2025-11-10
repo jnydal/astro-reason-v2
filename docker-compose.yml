@@ -67,6 +67,7 @@ services:
       minio:     { condition: service_healthy }
       local-llm: { condition: service_healthy }
       bootstrap: { condition: service_completed_successfully }
+    command: [ "rq", "worker", "-u", "${REDIS_URL}", "traits" ]
 
   worker-ingest:
     build: ./service/worker_ingest
@@ -159,13 +160,17 @@ services:
       dockerfile: Dockerfile
     env_file: ./.env
     environment:
-      <<: *default-env
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-BAAI/bge-large-en-v1.5}
     ports:
       - "8090:8090"
     deploy:
       replicas: 1
     depends_on:
+      db: { condition: service_healthy }
       redis: { condition: service_healthy }
+    command: [ "rq", "worker", "-u", "${REDIS_URL}", "embeddings" ]
 
   # One-shot bootstrap job (buckets, seeds, migrations)
   bootstrap:
