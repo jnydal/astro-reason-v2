@@ -5,7 +5,9 @@ services:
       dockerfile: service/resolver/Dockerfile
     environment:
       PG_DSN: postgresql://postgres:postgres@db:5432/astro_reason
-    depends_on: [db, redis]
+    depends_on:
+      db:    { condition: service_healthy }
+      redis: { condition: service_healthy }
 
   ingest:
     build:
@@ -14,7 +16,11 @@ services:
     environment:
       PG_DSN: postgresql://postgres:postgres@db:5432/astro_reason
       MINIO_ENDPOINT: http://minio:9000
-    depends_on: [db, minio, redis]
+    depends_on:
+      db:        { condition: service_healthy }
+      minio:     { condition: service_healthy }
+      redis:     { condition: service_healthy }
+      bootstrap: { condition: service_completed_successfully }
 
   astro:
     build:
@@ -23,4 +29,6 @@ services:
     environment:
       PG_DSN: postgresql://postgres:postgres@db:5432/astro_reason
       SE_EPHE_PATH: /opt/ephe
-    depends_on: [db, redis]
+    depends_on:
+      db:    { condition: service_healthy }
+      redis: { condition: service_healthy }
