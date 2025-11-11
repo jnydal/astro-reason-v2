@@ -1,0 +1,8 @@
+# requirements/worker_ingest_requirements.txt
+redis>=5.0
+rq>=1.16
+boto3>=1.35
+psycopg[binary]>=3.2
+lxml>=5.3
+numpy
+sentence-transformers

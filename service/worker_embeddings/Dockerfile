@@ -1,0 +1,30 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# (optional) shared base/constraints if you have them at repo root; remove if not used
+COPY requirements/base.txt requirements/constraints.txt ./requirements/
+RUN pip install --upgrade pip && \
+    pip install -r requirements/base.txt -c requirements/constraints.txt || true
+
+# service-specific requirements (relative to this folder)
+COPY requirements/worker_embeddings_requirements.txt ./requirements/
+RUN pip install -r ./requirements/worker_embeddings_requirements.txt -c requirements/constraints.txt || \
+    pip install -r ./requirements/worker_embeddings_requirements.txt
+
+# copy code
+COPY . .
+
+# make src importable -> "jobs.embed_person_bios" works
+ENV PYTHONPATH=/app/src:/app
+
+# RQ worker for the "embeddings" queue
+CMD ["rq", "worker", "-u", "redis://redis:6379/0", "embeddings"]

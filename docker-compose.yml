@@ -156,7 +156,7 @@ services:
   # Optional: lightweight embedding service if you want local embeddings
   embeddings:
     build:
-      context: ./service/embeddings
+      context: ./service/worker_embeddings
       dockerfile: Dockerfile
     env_file: ./.env
     environment:
