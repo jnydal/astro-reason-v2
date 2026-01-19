@@ -1,21 +1,11 @@
-FROM python:3.11-slim
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential curl ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
-
+FROM gradle:8.5-jdk17 AS build
 WORKDIR /app
-# copy and install base pins
-COPY requirements/base.txt requirements/constraints.txt ./requirements/
-RUN pip install --upgrade pip && \
-    pip install -r requirements/base.txt -c requirements/constraints.txt
+COPY build.gradle.kts settings.gradle.kts ./
+COPY service/core ./service/core
+COPY service/traits ./service/traits
+RUN gradle :service:traits:build --no-daemon
 
-# copy and install service-specific reqs (correct path)
-COPY service/resolver/requirements/traits_requirements.txt ./requirements/
-RUN pip install -r ./requirements/traits_requirements.txt -c requirements/constraints.txt
-
-# now copy source
-COPY . .
-ENV PYTHONPATH=/app/service:/app
-CMD ["python", "-m", "service.traits.app.score_vectors_bio"]
+FROM eclipse-temurin:17-jre-slim
+WORKDIR /app
+COPY --from=build /app/service/traits/build/libs/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]

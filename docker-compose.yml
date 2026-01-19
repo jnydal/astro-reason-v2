@@ -18,13 +18,16 @@ services:
 
   # API (depends on db/redis/minio + optional bootstrap)
   api:
-    build: ./service/api
+    build:
+      context: .
+      dockerfile: ./service/api/Dockerfile
     env_file: ./.env
     environment:
-      REDIS_URL: ${REDIS_URL}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minio}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minio123}
       MINIO_BUCKET_RAW: ${MINIO_BUCKET_RAW:-astro-raw}
     ports:
       - "8000:8000"
@@ -44,40 +47,32 @@ services:
   # Traits processor (LLM + storages)
   traits:
     build:
-      context: ./service/traits
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./service/traits/Dockerfile
     env_file: ./.env
     environment:
       <<: *default-env
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
-      MINIO_BUCKET_RAW: astro-raw
-      MINIO_BUCKET_REPORTS: astro-reports
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-bge-large}
-      TRAIT_LLM_PROVIDER: ollama
-      TRAIT_LLM_BASE_URL: http://local-llm:11434
-      TRAIT_LLM_MODEL: qwen2.5:7b-instruct-q4_K_M
+      PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      OLLAMA_URL: ${OLLAMA_URL:-http://local-llm:11434}
+      LLM_MODEL: ${LLM_MODEL:-qwen2.5:7b-instruct-q4_K_M}
     depends_on:
       db:        { condition: service_healthy }
       redis:     { condition: service_healthy }
-      minio:     { condition: service_healthy }
       local-llm: { condition: service_healthy }
       bootstrap: { condition: service_completed_successfully }
-    command: [ "rq", "worker", "-u", "${REDIS_URL}", "traits" ]
 
   worker-ingest:
-    build: ./service/worker_ingest
+    build:
+      context: .
+      dockerfile: ./service/worker-ingest/Dockerfile
     env_file: ./.env
     environment:
-      REDIS_URL: ${REDIS_URL}
-      DATABASE_URL: ${DATABASE_URL}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minio}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minio123}
     depends_on:
       db:
         condition: service_healthy
@@ -85,7 +80,52 @@ services:
         condition: service_started
       minio:
         condition: service_started
-    command: [ "rq", "worker", "-u", "${REDIS_URL}", "default" ]
+
+  resolver:
+    build:
+      context: .
+      dockerfile: ./service/resolver/Dockerfile
+    env_file: ./.env
+    environment:
+      PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
+      FETCH_BIO_URL: http://fetch-bio:8002
+    depends_on:
+      db:
+        condition: service_healthy
+      fetch-bio:
+        condition: service_started
+
+  fetch-bio:
+    build:
+      context: .
+      dockerfile: ./service/ingest/Dockerfile
+    env_file: ./.env
+    environment:
+      PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
+      PORT: 8002
+    ports:
+      - "8002:8002"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/healthz"]
+      interval: 10s
+      timeout: 2s
+      retries: 10
+
+  astro:
+    build:
+      context: .
+      dockerfile: ./service/astro/Dockerfile
+    env_file: ./.env
+    environment:
+      PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
+      SWEPH_EPHE_PATH: ${SWEPH_EPHE_PATH:-/opt/ephe}
+    depends_on:
+      db:
+        condition: service_healthy
 
   # Postgres with pgvector extension baked in
   db:

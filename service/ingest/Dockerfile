@@ -18,7 +18,12 @@ RUN pip install --upgrade pip && \
 COPY service/ingest/requirements/ingest_requirements.txt ./requirements/
 RUN pip install -r ./requirements/ingest_requirements.txt -c requirements/constraints.txt
 
+# Install FastAPI and uvicorn for the API
+RUN pip install --no-cache-dir fastapi uvicorn[standard] pydantic
+
 # now copy source
 COPY . .
 ENV PYTHONPATH=/app/service:/app
-CMD ["python", "-m", "service.ingest.app.fetch_bio"]
+
+EXPOSE 8002
+CMD ["python", "-m", "service.ingest.app.fetch_bio_api"]

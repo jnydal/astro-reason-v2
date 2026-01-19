@@ -1,0 +1,88 @@
+package com.astroreason.traits
+
+import com.astroreason.core.Config
+import com.astroreason.core.DatabaseManager
+import com.astroreason.core.schema.*
+import com.astroreason.core.queue.*
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.*
+import org.jetbrains.exposed.sql.*
+import org.jetbrains.exposed.sql.transactions.transaction
+import java.util.*
+
+fun main() {
+    Config.initialize()
+    
+    val settings = Config.settings
+    val jobQueue = createJobQueue(
+        settings.redisUrl ?: "redis://redis:6379/0",
+        "traits"
+    )
+    
+    val scorer = TraitScorer(
+        baseUrl = settings.ollamaUrl ?: "http://local-llm:11434",
+        model = settings.llmModel
+    )
+    
+    println("Trait worker started, listening for jobs...")
+    
+    while (true) {
+        val job = jobQueue.dequeue()
+        if (job != null) {
+            try {
+                jobQueue.updateStatus(job.id, JobStatus.STARTED)
+                
+                when (job.function) {
+                    "traits.score_person" -> {
+                        val personIdStr = job.args.firstOrNull()
+                            ?: throw IllegalArgumentException("Missing person_id")
+                        val personId = UUID.fromString(personIdStr)
+                        
+                        runBlocking {
+                            scorePersonTraits(personId, scorer)
+                        }
+                        
+                        jobQueue.updateStatus(job.id, JobStatus.FINISHED, result = "Success")
+                    }
+                    else -> {
+                        throw IllegalArgumentException("Unknown function: ${job.function}")
+                    }
+                }
+            } catch (e: Exception) {
+                jobQueue.updateStatus(
+                    job.id,
+                    JobStatus.FAILED,
+                    excInfo = e.message
+                )
+                e.printStackTrace()
+            }
+        }
+    }
+}
+
+suspend fun scorePersonTraits(personId: UUID, scorer: TraitScorer) {
+    transaction(DatabaseManager.getDatabase()) {
+        // Fetch bio text
+        val bioText = BioText.select {
+            BioText.personId eq personId
+        }.orderBy(BioText.updatedAt to SortOrder.DESC_NULLS_LAST)
+            .firstOrNull()?.get(BioText.text)
+            ?: throw IllegalStateException("No bio text found for person $personId")
+        
+        // Score vectors
+        val result = scorer.scoreVectorsBio(bioText)
+        val promptHash = scorer.hashPrompt(bioText)
+        
+        // Store in nlp_vectors
+        NlpVectors.insert {
+            it[NlpVectors.personId] = personId
+            it[NlpVectors.vectors] = Json.encodeToString(result.vectors)
+            it[NlpVectors.dominant] = result.dominant.joinToString(",")
+            it[NlpVectors.confidence] = result.confidence
+            it[NlpVectors.modelName] = scorer.model
+            it[NlpVectors.provider] = "ollama"
+            it[NlpVectors.temperature] = 0.1
+            it[NlpVectors.promptHash] = promptHash
+        }
+    }
+}

@@ -19,9 +19,9 @@ def clean_wikitext(wt):
     paras = [p.strip() for p in wt.split("\n") if len(p.strip())>120]
     return "\n\n".join(paras[:20])
 
-def run(dsn, lang="en"):
+def run(dsn, lang="en", limit=500):
     conn = psycopg2.connect(dsn); cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cur.execute("SELECT person_id, qid FROM bio_text WHERE text IS NULL AND qid IS NOT NULL LIMIT 500")
+    cur.execute("SELECT person_id, qid FROM bio_text WHERE text IS NULL AND qid IS NOT NULL LIMIT %s", (limit,))
     rows = cur.fetchall()
     wrote = 0
     for r in rows:
@@ -45,6 +45,7 @@ def run(dsn, lang="en"):
                    VALUES ('fetch_bio','ok', jsonb_build_object('written',$1,'lang',$2))""",
                 (wrote, lang))
     conn.commit(); cur.close(); conn.close()
+    return wrote
 
 if __name__ == "__main__":
     import os; run(os.environ["PG_DSN"], os.environ.get("WIKI_LANG","en"))
