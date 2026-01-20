@@ -156,3 +156,17 @@ object Embeddings1024 : Table("embeddings_1024") {
     
     override val primaryKey = PrimaryKey(personId, modelName)
 }
+
+object Embeddings1536 : Table("embeddings_1536") {
+    val personId = uuid("person_id").references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
+    val modelName = text("model_name")
+    val dim = integer("dim").check { it eq 1536 }
+    val vector = text("vector") // pgvector stored as text, will need custom handling
+    val textHash = text("text_hash").nullable()
+    val meta = jsonb("meta").nullable()
+    val source = text("source").nullable()
+    val updatedAt = timestamp("updated_at").nullable()
+    val createdAt = timestamp("created_at").defaultExpression(CurrentTimestamp())
+
+    override val primaryKey = PrimaryKey(personId, modelName)
+}

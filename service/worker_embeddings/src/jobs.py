@@ -1,9 +1,12 @@
 # embeddings/jobs.py
 import os
-import numpy as np
 from datetime import datetime
+
+import numpy as np
 import psycopg2, psycopg2.extras
+from pgvector.psycopg2 import register_vector
 from sentence_transformers import SentenceTransformer
+
 from app.core.provenance import log_event  # optional helper
 
 EMBED_MODEL = os.getenv("EMBEDDINGS_MODEL", "BAAI/bge-large-en-v1.5")
@@ -22,6 +25,7 @@ def embed_person_bios(payload: dict):
     print(f"Embedding {len(person_ids)} bios using {model_name}...")
 
     conn = psycopg2.connect(DSN)
+    register_vector(conn)
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     # Fetch texts that need embeddings (missing or text_hash changed)
@@ -53,6 +57,10 @@ def embed_person_bios(payload: dict):
 
     # Upsert into embeddings table
     for pid, vec, row in zip(pids, embeddings, todo):
+        dim = int(len(vec))
+        if dim not in (384, 768, 1024, 1536):
+            print(f"⚠️ Unsupported embedding dimension {dim} for person_id={pid}. Skipping.")
+            continue
         cur.execute("""
             INSERT INTO embeddings (person_id, model_name, dim, vector, text_hash, meta, source, updated_at)
             VALUES (%s, %s, %s, %s, %s, jsonb_build_object('provider','sentence-transformers'), %s, NOW())
@@ -63,7 +71,7 @@ def embed_person_bios(payload: dict):
                   meta = EXCLUDED.meta,
                   source = EXCLUDED.source,
                   updated_at = NOW()
-        """, (pid, model_name, len(vec), vec.tolist(), row["text_hash"], source))
+        """, (pid, model_name, dim, vec, row["text_hash"], source))
 
     conn.commit()
 
