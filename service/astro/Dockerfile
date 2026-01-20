@@ -5,7 +5,7 @@ COPY service/core ./service/core
 COPY service/astro ./service/astro
 RUN gradle :service:astro:build --no-daemon
 
-FROM eclipse-temurin:17-jre-slim
+FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
 # Swiss Ephemeris data (optional but recommended)
 RUN mkdir -p /opt/ephe && \

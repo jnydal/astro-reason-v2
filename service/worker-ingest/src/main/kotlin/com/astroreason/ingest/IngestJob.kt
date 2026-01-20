@@ -2,7 +2,10 @@ package com.astroreason.ingest
 
 import aws.sdk.kotlin.services.s3.S3Client
 import aws.sdk.kotlin.services.s3.model.GetObjectRequest
+import aws.sdk.kotlin.runtime.auth.credentials.StaticCredentialsProvider
+import aws.smithy.kotlin.runtime.auth.awscredentials.Credentials
 import aws.smithy.kotlin.runtime.content.writeToFile
+import aws.smithy.kotlin.runtime.net.url.Url
 import com.astroreason.core.*
 import com.astroreason.core.schema.*
 import com.astroreason.core.queue.JobQueue
@@ -24,12 +27,11 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
     
     val settings = Config.settings
     val s3Client = S3Client {
-        settings.s3Endpoint?.let { endpointUrl = it }
+        settings.s3Endpoint?.let { endpointUrl = Url.parse(it) }
         settings.s3AccessKey?.let {
-            credentials {
-                accessKeyId = it
-                secretAccessKey = settings.s3SecretKey ?: ""
-            }
+            credentialsProvider = StaticCredentialsProvider(
+                Credentials(it, settings.s3SecretKey ?: "")
+            )
         }
         region = "us-east-1"
     }
@@ -96,7 +98,7 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
                             }) {
                                 it[BioText.text] = data.text
                                 it[BioText.textHash] = data.textHash
-                                it[BioText.source] = data.source
+                                it[BioText.sourceCol] = data.source
                                 it[BioText.updatedAt] = java.time.Instant.now()
                             }
                         } else {
@@ -105,7 +107,7 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
                                 it[BioText.revId] = revId
                                 it[BioText.text] = data.text
                                 it[BioText.textHash] = data.textHash
-                                it[BioText.source] = data.source
+                                it[BioText.sourceCol] = data.source
                                 it[BioText.updatedAt] = java.time.Instant.now()
                             }
                         }
@@ -124,13 +126,13 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
                         it[name] = rec.fullName ?: ""
                         it[biographyStub] = rec.bioText
                     }
-                    existing[PersonRaw.id]
+                    existing[PersonRaw.id].value
                 } else {
                     PersonRaw.insert {
                         it[xmlId] = rec.adbId
                         it[name] = rec.fullName ?: ""
                         it[biographyStub] = rec.bioText
-                    }[PersonRaw.id]
+                    }[PersonRaw.id].value
                 }
                 
                 touchedPids.add(personId)

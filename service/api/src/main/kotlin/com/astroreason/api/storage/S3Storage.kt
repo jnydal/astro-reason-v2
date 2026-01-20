@@ -2,7 +2,10 @@ package com.astroreason.api.storage
 
 import aws.sdk.kotlin.services.s3.S3Client
 import aws.sdk.kotlin.services.s3.model.*
+import aws.sdk.kotlin.runtime.auth.credentials.StaticCredentialsProvider
+import aws.smithy.kotlin.runtime.auth.awscredentials.Credentials
 import aws.smithy.kotlin.runtime.content.ByteStream
+import aws.smithy.kotlin.runtime.net.url.Url
 import com.astroreason.core.Config
 import kotlinx.coroutines.runBlocking
 import java.security.MessageDigest
@@ -15,14 +18,13 @@ class S3Storage(
     private val secretKey: String?
 ) {
     private val s3Client = S3Client {
-        endpoint?.let { 
-            endpointUrl = it
+        endpoint?.let {
+            endpointUrl = Url.parse(it)
         }
         accessKey?.let {
-            credentials {
-                accessKeyId = it
-                secretAccessKey = secretKey ?: ""
-            }
+            credentialsProvider = StaticCredentialsProvider(
+                Credentials(it, secretKey ?: "")
+            )
         }
         region = "us-east-1" // MinIO ignores but SDK requires
     }
@@ -30,14 +32,14 @@ class S3Storage(
     fun ensureBucket() {
         runBlocking {
             try {
-                s3Client.headBucket {
-                    this.bucket = this@S3Storage.bucket
-                }
+                s3Client.headBucket(HeadBucketRequest {
+                    bucket = this@S3Storage.bucket
+                })
             } catch (e: Exception) {
-                s3Client.createBucket {
-                    this.bucket = this@S3Storage.bucket
+                s3Client.createBucket(CreateBucketRequest {
+                    bucket = this@S3Storage.bucket
                     acl = BucketCannedAcl.Private
-                }
+                })
             }
         }
     }
@@ -52,12 +54,12 @@ class S3Storage(
         val key = "$namespace/$hash-$timestamp.xml"
         
         runBlocking {
-            s3Client.putObject {
-                this.bucket = this@S3Storage.bucket
+            s3Client.putObject(PutObjectRequest {
+                bucket = this@S3Storage.bucket
                 this.key = key
                 body = ByteStream.fromBytes(content)
                 this.contentType = contentType
-            }
+            })
         }
         
         return "s3://$bucket/$key"

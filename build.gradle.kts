@@ -16,16 +16,16 @@ subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
     apply(plugin = "org.jetbrains.kotlin.plugin.serialization")
 
-    kotlin {
+    extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension> {
         jvmToolchain(17)
     }
 
     dependencies {
-        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-        implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
+        add("implementation", "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+        add("implementation", "org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
     }
-    
-    tasks.withType<Test> {
+
+    tasks.withType<Test>().configureEach {
         useJUnitPlatform()
     }
 }

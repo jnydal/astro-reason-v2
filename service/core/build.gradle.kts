@@ -5,9 +5,11 @@ plugins {
 
 dependencies {
     // Database
-    implementation("org.jetbrains.exposed:exposed-core:0.49.0")
-    implementation("org.jetbrains.exposed:exposed-jdbc:0.49.0")
-    implementation("org.jetbrains.exposed:exposed-kotlin-datetime:0.49.0")
+    api("org.jetbrains.exposed:exposed-core:0.49.0")
+    api("org.jetbrains.exposed:exposed-dao:0.49.0")
+    api("org.jetbrains.exposed:exposed-jdbc:0.49.0")
+    api("org.jetbrains.exposed:exposed-kotlin-datetime:0.49.0")
+    api("org.jetbrains.exposed:exposed-java-time:0.49.0")
     implementation("com.zaxxer:HikariCP:5.1.0")
     implementation("org.postgresql:postgresql:42.7.1")
 

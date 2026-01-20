@@ -5,7 +5,7 @@ COPY service/core ./service/core
 COPY service/api ./service/api
 RUN gradle :service:api:build --no-daemon
 
-FROM eclipse-temurin:17-jre-slim
+FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
 COPY --from=build /app/service/api/build/libs/*.jar app.jar
 EXPOSE 8000

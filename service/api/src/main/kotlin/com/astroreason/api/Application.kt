@@ -12,8 +12,11 @@ import io.ktor.server.netty.*
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.plugins.cors.routing.*
 import io.ktor.server.request.*
+import io.ktor.http.content.PartData
+import io.ktor.http.content.forEachPart
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import io.ktor.utils.io.core.readBytes
 import kotlinx.serialization.json.Json
 import java.util.*
 
@@ -63,14 +66,14 @@ fun Application.module() {
             
             multipart.forEachPart { part ->
                 when (part) {
-                    is io.ktor.server.request.ApplicationPart.FileItem -> {
+                    is PartData.FileItem -> {
                         val contentType = part.contentType
                         val originalFileName = part.originalFileName
                         if (contentType?.match(ContentType.Application.Xml) == true ||
                             contentType?.match(ContentType.Text.Xml) == true ||
                             originalFileName?.endsWith(".xml", ignoreCase = true) == true) {
                             filename = originalFileName
-                            xmlFile = part.streamProvider().readBytes()
+                            xmlFile = part.provider().readBytes()
                         }
                     }
                     else -> {}

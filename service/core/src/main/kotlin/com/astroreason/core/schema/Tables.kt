@@ -3,13 +3,14 @@ package com.astroreason.core.schema
 import org.jetbrains.exposed.dao.id.UUIDTable
 import org.jetbrains.exposed.dao.id.LongIdTable
 import org.jetbrains.exposed.sql.*
+import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.javatime.date
 import org.jetbrains.exposed.sql.javatime.time
 import org.jetbrains.exposed.sql.javatime.timestamp
 import java.util.*
 
 // Helper for JSONB columns - stored as text in Exposed
-fun jsonb(name: String): Column<String> = text(name)
+fun Table.jsonb(name: String): Column<String> = text(name)
 
 object PersonRaw : UUIDTable("person_raw", columnName = "id") {
     val xmlId = text("xml_id").nullable()
@@ -33,7 +34,7 @@ object Birth : UUIDTable("birth", columnName = "person_id") {
     val dataQuality = text("data_quality").nullable()
     
     init {
-        references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
+        id.references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
     }
 }
 
@@ -45,7 +46,7 @@ object EntityLink : UUIDTable("entity_link", columnName = "person_id") {
     val decidedAt = timestamp("decided_at").nullable()
     
     init {
-        references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
+        id.references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
     }
 }
 
@@ -62,7 +63,7 @@ object BioText : Table("bio_text") {
     val retrievedAt = timestamp("retrieved_at").nullable()
     val charCount = integer("char_count").nullable()
     val textUri = text("text_uri").nullable()
-    val source = text("source").nullable()
+    val sourceCol = text("source").nullable()
     val updatedAt = timestamp("updated_at").nullable()
     val textHash = text("text_hash").nullable()
     
@@ -78,7 +79,7 @@ object NlpTraits : UUIDTable("nlp_traits", columnName = "person_id") {
     val createdAt = timestamp("created_at").defaultExpression(CurrentTimestamp())
     
     init {
-        references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
+        id.references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
     }
 }
 
@@ -111,7 +112,7 @@ object AstroFeatures : UUIDTable("astro_features", columnName = "person_id") {
     val createdAt = timestamp("created_at").defaultExpression(CurrentTimestamp())
     
     init {
-        references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
+        id.references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
     }
 }
 
@@ -122,7 +123,7 @@ object Embeddings384 : Table("embeddings_384") {
     val vector = text("vector") // pgvector stored as text, will need custom handling
     val textHash = text("text_hash").nullable()
     val meta = jsonb("meta").nullable()
-    val source = text("source").nullable()
+    val sourceCol = text("source").nullable()
     val updatedAt = timestamp("updated_at").nullable()
     val createdAt = timestamp("created_at").defaultExpression(CurrentTimestamp())
     
@@ -136,7 +137,7 @@ object Embeddings768 : Table("embeddings_768") {
     val vector = text("vector") // pgvector stored as text, will need custom handling
     val textHash = text("text_hash").nullable()
     val meta = jsonb("meta").nullable()
-    val source = text("source").nullable()
+    val sourceCol = text("source").nullable()
     val updatedAt = timestamp("updated_at").nullable()
     val createdAt = timestamp("created_at").defaultExpression(CurrentTimestamp())
     
@@ -150,7 +151,7 @@ object Embeddings1024 : Table("embeddings_1024") {
     val vector = text("vector") // pgvector stored as text, will need custom handling
     val textHash = text("text_hash").nullable()
     val meta = jsonb("meta").nullable()
-    val source = text("source").nullable()
+    val sourceCol = text("source").nullable()
     val updatedAt = timestamp("updated_at").nullable()
     val createdAt = timestamp("created_at").defaultExpression(CurrentTimestamp())
     
@@ -164,7 +165,7 @@ object Embeddings1536 : Table("embeddings_1536") {
     val vector = text("vector") // pgvector stored as text, will need custom handling
     val textHash = text("text_hash").nullable()
     val meta = jsonb("meta").nullable()
-    val source = text("source").nullable()
+    val sourceCol = text("source").nullable()
     val updatedAt = timestamp("updated_at").nullable()
     val createdAt = timestamp("created_at").defaultExpression(CurrentTimestamp())
 

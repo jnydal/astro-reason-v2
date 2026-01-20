@@ -5,7 +5,7 @@ COPY service/core ./service/core
 COPY service/worker-ingest ./service/worker-ingest
 RUN gradle :service:worker-ingest:build --no-daemon
 
-FROM eclipse-temurin:17-jre-slim
+FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
 COPY --from=build /app/service/worker-ingest/build/libs/*.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]

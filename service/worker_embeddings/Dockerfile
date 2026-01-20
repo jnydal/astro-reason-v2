@@ -10,14 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# (optional) shared base/constraints if you have them at repo root; remove if not used
-COPY requirements/base.txt requirements/constraints.txt ./requirements/
-RUN pip install --upgrade pip && \
-    pip install -r requirements/base.txt -c requirements/constraints.txt || true
-
 # service-specific requirements (relative to this folder)
 COPY requirements/worker_embeddings_requirements.txt ./requirements/
-RUN pip install -r ./requirements/worker_embeddings_requirements.txt -c requirements/constraints.txt || \
+RUN pip install --upgrade pip && \
     pip install -r ./requirements/worker_embeddings_requirements.txt
 
 # copy code

@@ -4,6 +4,8 @@ import com.astroreason.core.Config
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.timeout
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.http.*
@@ -66,7 +68,7 @@ data class OllamaChatResponse(
 
 class TraitScorer(
     private val baseUrl: String,
-    private val model: String
+    val model: String
 ) {
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
@@ -75,6 +77,7 @@ class TraitScorer(
                 isLenient = true
             })
         }
+        install(HttpTimeout)
     }
     
     private val systemPrompt = """

@@ -47,7 +47,7 @@ class JobQueue(private val jedisPool: JedisPool, private val queueName: String =
         jedisPool.resource.use { jedis ->
             val jobJson = Json.encodeToString(job)
             jedis.lpush("rq:queue:$queueName", jobJson)
-            jedis.setex("rq:job:${job.id}", resultTtl, jobJson)
+            jedis.setex("rq:job:${job.id}", resultTtl.toLong(), jobJson)
         }
         
         return job

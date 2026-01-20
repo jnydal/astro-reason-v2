@@ -4,11 +4,10 @@ import com.astroreason.core.Config
 import com.astroreason.core.DatabaseManager
 import com.astroreason.core.schema.*
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
-import swisseph.SwissEph
-import swisseph.SweConst
 import java.time.*
 import java.util.*
 import kotlin.math.*
@@ -123,7 +122,7 @@ fun toJulianDay(date: LocalDate, time: LocalTime?, tzOffsetMinutes: Int?): Pair<
     // Simplified Julian Day calculation
     val year = dtUtc.year
     val month = dtUtc.monthValue
-    val day = dtUtc.day
+    val day = dtUtc.dayOfMonth
     val hour = dtUtc.hour
     val minute = dtUtc.minute
     val second = dtUtc.second
@@ -145,33 +144,83 @@ fun toJulianDay(date: LocalDate, time: LocalTime?, tzOffsetMinutes: Int?): Pair<
  * and optional house cusps when latitude/longitude are available.
  */
 class SwissEphemerisBackend(ephePath: String? = null) {
-    private val swe = if (ephePath != null) SwissEph(ephePath) else SwissEph()
+    private val swe: Any
+    private val calcMethod: java.lang.reflect.Method
+    private val housesMethod: java.lang.reflect.Method
+    private val flags: Int
+    private val bodyMap: Map<String, Int>
+
+    init {
+        val sweClass = Class.forName("swisseph.SwissEph")
+        val sweConst = Class.forName("swisseph.SweConst")
+
+        swe = if (ephePath != null) {
+            sweClass.getConstructor(String::class.java).newInstance(ephePath)
+        } else {
+            sweClass.getConstructor().newInstance()
+        }
+
+        calcMethod = sweClass.getMethod(
+            "swe_calc_ut",
+            Double::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+            DoubleArray::class.java,
+            StringBuffer::class.java
+        )
+        housesMethod = sweClass.getMethod(
+            "swe_houses",
+            Double::class.javaPrimitiveType,
+            Double::class.javaPrimitiveType,
+            Double::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+            DoubleArray::class.java,
+            DoubleArray::class.java
+        )
+
+        val flagsSwieph = sweConst.getField("SEFLG_SWIEPH").getInt(null)
+        val flagsSpeed = sweConst.getField("SEFLG_SPEED").getInt(null)
+        flags = flagsSwieph or flagsSpeed
+
+        bodyMap = mapOf(
+            "sun" to sweConst.getField("SE_SUN").getInt(null),
+            "moon" to sweConst.getField("SE_MOON").getInt(null),
+            "mercury" to sweConst.getField("SE_MERCURY").getInt(null),
+            "venus" to sweConst.getField("SE_VENUS").getInt(null),
+            "mars" to sweConst.getField("SE_MARS").getInt(null),
+            "jupiter" to sweConst.getField("SE_JUPITER").getInt(null),
+            "saturn" to sweConst.getField("SE_SATURN").getInt(null),
+            "uranus" to sweConst.getField("SE_URANUS").getInt(null),
+            "neptune" to sweConst.getField("SE_NEPTUNE").getInt(null),
+            "pluto" to sweConst.getField("SE_PLUTO").getInt(null)
+        )
+    }
 
     fun getPlanetLongitudes(jdUt: Double): PlanetLongitudes {
-        val flags = SweConst.SEFLG_SWIEPH or SweConst.SEFLG_SPEED
         val serr = StringBuffer()
         val res = DoubleArray(6)
 
-        fun calc(body: Int): Double {
-            val rc = swe.swe_calc_ut(jdUt, body, flags, res, serr)
+        fun calc(bodyKey: String): Double {
+            val body = bodyMap[bodyKey] ?: error("Unknown SwissEph body: $bodyKey")
+            val rc = (calcMethod.invoke(swe, jdUt, body, flags, res, serr) as Int)
             if (rc < 0) {
-                throw RuntimeException("Swiss Ephemeris error for body=$body: $serr")
+                throw RuntimeException("Swiss Ephemeris error for body=$bodyKey: $serr")
             }
             // res[0] = ecliptic longitude in degrees
             return wrap360(res[0])
         }
 
         return PlanetLongitudes(
-            sun = calc(SweConst.SE_SUN),
-            moon = calc(SweConst.SE_MOON),
-            mercury = calc(SweConst.SE_MERCURY),
-            venus = calc(SweConst.SE_VENUS),
-            mars = calc(SweConst.SE_MARS),
-            jupiter = calc(SweConst.SE_JUPITER),
-            saturn = calc(SweConst.SE_SATURN),
-            uranus = calc(SweConst.SE_URANUS),
-            neptune = calc(SweConst.SE_NEPTUNE),
-            pluto = calc(SweConst.SE_PLUTO)
+            sun = calc("sun"),
+            moon = calc("moon"),
+            mercury = calc("mercury"),
+            venus = calc("venus"),
+            mars = calc("mars"),
+            jupiter = calc("jupiter"),
+            saturn = calc("saturn"),
+            uranus = calc("uranus"),
+            neptune = calc("neptune"),
+            pluto = calc("pluto")
         )
     }
 
@@ -182,7 +231,7 @@ class SwissEphemerisBackend(ephePath: String? = null) {
         val cusps = DoubleArray(13)
         val ascmc = DoubleArray(10)
         // SwissEph expects a single‑char int code for the house system
-        swe.swe_houses(jdUt, lat, lon, system.first().code, cusps, ascmc)
+        housesMethod.invoke(swe, jdUt, lat, lon, system.first().code, cusps, ascmc)
 
         val result = mutableMapOf<String, Double>()
         for (i in 1..12) {
@@ -351,21 +400,30 @@ fun computeFeaturesForPerson(
 ): AstroFeaturesData {
     val (jd, unknownTime) = toJulianDay(date, time, tzOffsetMinutes)
 
-    val longs: PlanetLongitudes
-    val houses: Map<String, Double>?
+    var longs: PlanetLongitudes
+    var houses: Map<String, Double>?
+    var systemName = backend
 
     if (backend == "swisseph") {
-        val sweBackend = SwissEphemerisBackend(ephePath)
-        longs = sweBackend.getPlanetLongitudes(jd)
-        houses = if (lat != null && lon != null) {
-            try {
-                sweBackend.getHouses(jd, lat, lon, "P")
-            } catch (e: Exception) {
-                // Graceful degradation: continue without houses
+        try {
+            val sweBackend = SwissEphemerisBackend(ephePath)
+            longs = sweBackend.getPlanetLongitudes(jd)
+            houses = if (lat != null && lon != null) {
+                try {
+                    sweBackend.getHouses(jd, lat, lon, "P")
+                } catch (e: Exception) {
+                    // Graceful degradation: continue without houses
+                    null
+                }
+            } else {
                 null
             }
-        } else {
-            null
+        } catch (e: Throwable) {
+            println("⚠️ Swiss Ephemeris unavailable, falling back: ${e.message}")
+            systemName = "fallback"
+            val fb = FallbackBackend()
+            longs = fb.getPlanetLongitudes(jd)
+            houses = null
         }
     } else {
         val fb = FallbackBackend()
@@ -378,7 +436,7 @@ fun computeFeaturesForPerson(
     val featureVec = flattenFeatureVec(longs, aspects, elemRatios, modalityRatios)
     
     return AstroFeaturesData(
-        system = backend,
+        system = systemName,
         jdUtc = jd,
         unknownTime = unknownTime,
         longs = longs,
@@ -409,7 +467,7 @@ fun run(batchSize: Int = 128) {
         
         for (row in rows) {
             try {
-                val personId = row[Birth.id]
+                val personId = row[Birth.id].value
                 val date = row[Birth.date] ?: continue
                 val time = row[Birth.time]
                 val tzOffset = row[Birth.tzOffsetMinutes]

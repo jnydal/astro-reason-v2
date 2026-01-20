@@ -5,7 +5,7 @@ COPY service/core ./service/core
 COPY service/resolver ./service/resolver
 RUN gradle :service:resolver:build --no-daemon
 
-FROM eclipse-temurin:17-jre-slim
+FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
 COPY --from=build /app/service/resolver/build/libs/*.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]

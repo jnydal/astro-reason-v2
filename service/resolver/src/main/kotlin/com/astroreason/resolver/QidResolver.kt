@@ -6,7 +6,9 @@ import com.astroreason.core.schema.*
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
@@ -69,6 +71,7 @@ class QidResolver {
                 isLenient = true
             })
         }
+        install(HttpTimeout)
     }
     
     suspend fun searchQid(name: String): List<WikidataItem> {
@@ -107,52 +110,65 @@ class QidResolver {
     }
     
     suspend fun resolveQids(limit: Int = 500) {
-        transaction(DatabaseManager.getDatabase()) {
-            val rows = PersonRaw
+        data class PendingPerson(
+            val personId: UUID,
+            val fullName: String,
+            val dobIso: String?
+        )
+
+        val pending = transaction(DatabaseManager.getDatabase()) {
+            PersonRaw
                 .innerJoin(Birth, { PersonRaw.id }, { Birth.id })
                 .leftJoin(BioText, { PersonRaw.id }, { BioText.personId })
                 .slice(PersonRaw.id, PersonRaw.name, Birth.date)
-                .select {
-                    BioText.personId.isNull()
-                }
+                .select { BioText.personId.isNull() }
                 .limit(limit)
-            
-            var hits = 0
-            
-            for (row in rows) {
-                val personId = row[PersonRaw.id]
-                val fullName = row[PersonRaw.name]
-                val dob = row[Birth.date]?.format(DateTimeFormatter.ISO_DATE)
-                
-                val candidates = searchQid(fullName)
-                var qid: String? = null
-                
-                // Try to match by date
-                for (candidate in candidates.take(10)) {
-                    if (dobMatches(candidate.id, dob)) {
-                        qid = candidate.id
-                        break
-                    }
+                .map { row ->
+                    PendingPerson(
+                        personId = row[PersonRaw.id].value,
+                        fullName = row[PersonRaw.name],
+                        dobIso = row[Birth.date]?.format(DateTimeFormatter.ISO_DATE)
+                    )
                 }
-                
-                // Fallback to first candidate
-                if (qid == null && candidates.isNotEmpty()) {
-                    qid = candidates[0].id
+        }
+
+        val resolved = mutableListOf<Pair<UUID, String>>()
+
+        for (person in pending) {
+            val candidates = searchQid(person.fullName)
+            var qid: String? = null
+
+            // Try to match by date
+            for (candidate in candidates.take(10)) {
+                if (dobMatches(candidate.id, person.dobIso)) {
+                    qid = candidate.id
+                    break
                 }
-                
-                if (qid != null) {
+            }
+
+            // Fallback to first candidate
+            if (qid == null && candidates.isNotEmpty()) {
+                qid = candidates[0].id
+            }
+
+            if (qid != null) {
+                resolved.add(person.personId to qid)
+            }
+        }
+
+        if (resolved.isNotEmpty()) {
+            transaction(DatabaseManager.getDatabase()) {
+                for ((personId, qid) in resolved) {
                     BioText.insert {
                         it[BioText.personId] = personId
                         it[BioText.revId] = 0L
                         it[BioText.qid] = qid
                     }
-                    hits++
                 }
             }
-            
-            commit()
-            println("✅ Resolved $hits QIDs")
         }
+
+        println("✅ Resolved ${resolved.size} QIDs")
     }
     
     @Serializable
