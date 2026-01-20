@@ -3,3 +3,4 @@ psycopg[binary]
 pgvector
 numpy
 sentence-transformers
+rq
