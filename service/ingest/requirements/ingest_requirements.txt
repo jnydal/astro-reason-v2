@@ -4,4 +4,5 @@ psycopg[binary]
 # minio
 lxml
 requests
+rq
 

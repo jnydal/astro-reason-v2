@@ -169,31 +169,9 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
             commit()
         }
         
-        // Enqueue embedding jobs
-        var jobsEnqueued = 0
-        if (touchedPids.isNotEmpty()) {
-            val jobQueue = createJobQueue(
-                settings.redisUrl ?: "redis://redis:6379/0",
-                "embeddings"
-            )
-            
-            val pids = touchedPids.toList()
-            for (i in pids.indices step 200) {
-                val batch = pids.slice(i until minOf(i + 200, pids.size))
-                jobQueue.enqueue(
-                    function = "embeddings.jobs.embed_person_bios",
-                    kwargs = mapOf(
-                        "person_ids" to batch.joinToString(",") { it.toString() },
-                        "model" to (settings.embeddingsModel),
-                        "source" to source
-                    ),
-                    jobTimeout = 1800
-                )
-                jobsEnqueued++
-            }
-        }
-        
-        println("✅ Parsed $recordsSeen records, upserted ${touchedPids.size} people, enqueued $jobsEnqueued jobs")
+        // Note: semantic embeddings are now triggered after wiki enrichment
+        // from the fetch-bio service, to ensure they run on full biographies.
+        println("✅ Parsed $recordsSeen records, upserted ${touchedPids.size} people")
         
     } finally {
         tempFile.delete()
