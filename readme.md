@@ -45,6 +45,27 @@ Astrological encoding (ephemeris)
 Stats + correlation visualization
 ```
 
+### Detailed flow
+
+Input & Ingest:
+AstroDatabank XML is uploaded → Kotlin ingest worker parses it → writes to PostgreSQL (person_raw, birth, initial bio_text stubs).
+
+Wikidata / Wikipedia enrichment:
+Resolver service takes name + date of birth → resolves a Wikidata QID → stores it → calls the fetch-bio Python service → Wikipedia biography text is written into bio_text.
+
+Embeddings (semantic):
+Ingest enqueues jobs to the embeddings Redis queue → Python embeddings worker pulls those → computes sentence-transformer embeddings → stores vectors in embeddings_* tables in PostgreSQL.
+
+Yuri Burlan scoring (traits):
+The traits worker is implemented (Kotlin + local LLM) and will take biography text and write 8‑vector traits into nlp_vectors, but nothing currently enqueues/starts these jobs, so this step is conceptually in place but not yet wired into the pipeline.
+
+Astrological encoding / astro features:
+The astro service polls births without astro_features, computes ephemeris‑based features (currently via a fallback backend, with Swiss Ephemeris JNI planned) and stores structured astro features + a flat numeric feature vector in astro_features.
+
+Storage & analysis:
+All along, PostgreSQL is the source of truth for people, births, bios, traits, embeddings, and astro features. Redis is used as the job queue between steps (ingest → embeddings, API → ingest worker, traits once wired). From there you can query/visualize/analyze whenever you like.
+
+
 ### System Components
 
 | Component | Description |
