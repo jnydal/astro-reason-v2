@@ -7,6 +7,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
+import swisseph.SwissEph
+import swisseph.SweConst
 import java.time.*
 import java.util.*
 import kotlin.math.*
@@ -136,21 +138,62 @@ fun toJulianDay(date: LocalDate, time: LocalTime?, tzOffsetMinutes: Int?): Pair<
     return jd to unknownTime
 }
 
-// Placeholder for Swiss Ephemeris - actual implementation needs JNI
-class SwissEphemerisBackend(private val ephePath: String? = null) {
+/**
+ * Swiss Ephemeris backend using the official Java wrapper.
+ *
+ * This uses high‑precision planetary positions from the Swiss Ephemeris
+ * and optional house cusps when latitude/longitude are available.
+ */
+class SwissEphemerisBackend(ephePath: String? = null) {
+    private val swe = if (ephePath != null) SwissEph(ephePath) else SwissEph()
+
     fun getPlanetLongitudes(jdUt: Double): PlanetLongitudes {
-        // TODO: Implement with Swiss Ephemeris JNI
-        // For now, return placeholder values
-        throw NotImplementedError("Swiss Ephemeris JNI not yet implemented")
+        val flags = SweConst.SEFLG_SWIEPH or SweConst.SEFLG_SPEED
+        val serr = StringBuffer()
+        val res = DoubleArray(6)
+
+        fun calc(body: Int): Double {
+            val rc = swe.swe_calc_ut(jdUt, body, flags, res, serr)
+            if (rc < 0) {
+                throw RuntimeException("Swiss Ephemeris error for body=$body: $serr")
+            }
+            // res[0] = ecliptic longitude in degrees
+            return wrap360(res[0])
+        }
+
+        return PlanetLongitudes(
+            sun = calc(SweConst.SE_SUN),
+            moon = calc(SweConst.SE_MOON),
+            mercury = calc(SweConst.SE_MERCURY),
+            venus = calc(SweConst.SE_VENUS),
+            mars = calc(SweConst.SE_MARS),
+            jupiter = calc(SweConst.SE_JUPITER),
+            saturn = calc(SweConst.SE_SATURN),
+            uranus = calc(SweConst.SE_URANUS),
+            neptune = calc(SweConst.SE_NEPTUNE),
+            pluto = calc(SweConst.SE_PLUTO)
+        )
     }
-    
+
+    /**
+     * Compute Placidus house cusps using Swiss Ephemeris.
+     */
     fun getHouses(jdUt: Double, lat: Double, lon: Double, system: String = "P"): Map<String, Double>? {
-        // TODO: Implement with Swiss Ephemeris JNI
-        throw NotImplementedError("Swiss Ephemeris JNI not yet implemented")
+        val cusps = DoubleArray(13)
+        val ascmc = DoubleArray(10)
+        // SwissEph expects a single‑char int code for the house system
+        swe.swe_houses(jdUt, lat, lon, system.first().code, cusps, ascmc)
+
+        val result = mutableMapOf<String, Double>()
+        for (i in 1..12) {
+            result["house_$i"] = wrap360(cusps[i])
+        }
+        // Optionally expose ASC/MC later via ascmc
+        return result
     }
 }
 
-// Fallback using basic calculations (simplified)
+// Fallback using basic calculations (simplified, low‑precision)
 class FallbackBackend {
     fun getPlanetLongitudes(jdUt: Double): PlanetLongitudes {
         // Simplified calculation - in production, use proper ephemeris
@@ -303,19 +346,32 @@ fun computeFeaturesForPerson(
     tzOffsetMinutes: Int?,
     lat: Double?,
     lon: Double?,
-    backend: String = "fallback"
+    backend: String = "fallback",
+    ephePath: String? = null
 ): AstroFeaturesData {
     val (jd, unknownTime) = toJulianDay(date, time, tzOffsetMinutes)
-    
-    val longs = when (backend) {
-        "swisseph" -> {
-            // TODO: Use Swiss Ephemeris when JNI is available
-            FallbackBackend().getPlanetLongitudes(jd)
+
+    val longs: PlanetLongitudes
+    val houses: Map<String, Double>?
+
+    if (backend == "swisseph") {
+        val sweBackend = SwissEphemerisBackend(ephePath)
+        longs = sweBackend.getPlanetLongitudes(jd)
+        houses = if (lat != null && lon != null) {
+            try {
+                sweBackend.getHouses(jd, lat, lon, "P")
+            } catch (e: Exception) {
+                // Graceful degradation: continue without houses
+                null
+            }
+        } else {
+            null
         }
-        else -> FallbackBackend().getPlanetLongitudes(jd)
+    } else {
+        val fb = FallbackBackend()
+        longs = fb.getPlanetLongitudes(jd)
+        houses = null
     }
-    
-    val houses: Map<String, Double>? = null // TODO: Implement when Swiss Ephemeris is available
     
     val aspects = computeAspects(longs)
     val (elemRatios, modalityRatios) = elemModalityTallies(longs)
@@ -336,7 +392,10 @@ fun computeFeaturesForPerson(
 
 fun run(batchSize: Int = 128) {
     Config.initialize()
-    
+    val settings = Config.settings
+    val backend = settings.astroBackend.lowercase()
+    val effectiveBackend = if (backend == "swisseph") "swisseph" else "fallback"
+
     transaction(DatabaseManager.getDatabase()) {
         val rows = Birth
             .leftJoin(AstroFeatures, { Birth.id }, { AstroFeatures.id })
@@ -356,7 +415,7 @@ fun run(batchSize: Int = 128) {
                 val tzOffset = row[Birth.tzOffsetMinutes]
                 val lat = row[Birth.lat]
                 val lon = row[Birth.lon]
-                
+
                 val feats = computeFeaturesForPerson(
                     personId = personId,
                     date = date,
@@ -364,7 +423,8 @@ fun run(batchSize: Int = 128) {
                     tzOffsetMinutes = tzOffset,
                     lat = lat,
                     lon = lon,
-                    backend = "fallback"
+                    backend = effectiveBackend,
+                    ephePath = settings.swephEphePath
                 )
                 
                 val json = Json { ignoreUnknownKeys = true }
@@ -390,7 +450,7 @@ fun run(batchSize: Int = 128) {
         }
         
         commit()
-        println("✅ astro_features: wrote $wrote rows using backend=fallback")
+        println("✅ astro_features: wrote $wrote rows using backend=$effectiveBackend")
     }
 }
 

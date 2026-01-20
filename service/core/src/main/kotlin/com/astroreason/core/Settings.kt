@@ -32,6 +32,9 @@ data class Settings(
     val wikiLangDefault: String = System.getenv("WIKI_LANG_DEFAULT") ?: "en",
     
     // Astro
+    // Which backend to use for astro features: "swisseph" (default, high precision) or "fallback"
+    val astroBackend: String = System.getenv("ASTRO_BACKEND") ?: "swisseph",
+    // Optional path to Swiss Ephemeris data files (e.g. /opt/ephe), falls back to Docker ENV SE_EPHE_PATH
     val swephEphePath: String? = System.getenv("SWEPH_EPHE_PATH") ?: System.getenv("SE_EPHE_PATH")
 )
 
