@@ -1,17 +1,11 @@
 Recommended Next Steps (Priority Order)
 
-1. Complete Swiss Ephemeris Integration (MEDIUM PRIORITY) **(DONE – initial JVM integration)**
-Replace the fallback with accurate calculations:
-- Wire in Swiss Ephemeris Java/JNI wrapper and ephemeris data path
-- Update `AstroFeatures.kt` to use the Swiss Ephemeris backend when `ASTRO_BACKEND=swisseph`
-- Keep fallback backend as a safe default and add spot‑checks against known ephemeris data
-
-2. Pipeline Monitoring & Observability (NICE TO HAVE)
+1. Pipeline Monitoring & Observability (NICE TO HAVE)
 - Add metrics for pipeline completion rates
 - Dashboard showing: people processed, traits scored, embeddings computed, correlations computed
 - Alerting for stuck jobs or failures
 
-3. Implement Statistical Analysis Service (CORE PURPOSE)
+2. Implement Statistical Analysis Service (CORE PURPOSE)
 This is the final step. Create a new service or add endpoints to:
 
 Features needed:
@@ -25,3 +19,9 @@ Implementation approach:
 - New Kotlin service `service/stats` or add endpoints to API
 - Use Kotlin statistics libraries (e.g., `org.apache.commons:commons-math3`)
 - Or call Python via HTTP (scipy, pandas, scikit-learn)
+
+3. Embeddings DB coherence + migration handling (CORE PIPELINE)
+- Ensure embeddings schema matches worker writes (text_hash, meta, source, updated_at)
+- Confirm `pgvector` extension is available and migrations are actually applied
+- Validate insert routing for `embeddings` view with `ON CONFLICT` behavior
+  - If upserts against the view fail, write to dimensioned tables directly
