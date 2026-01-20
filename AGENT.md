@@ -147,16 +147,13 @@ docker compose logs -f embeddings
 
 ### Step 4: Score Traits
 
-**Current State**: Traits worker is waiting for jobs but nothing enqueues them.
+**Current State**: Traits jobs are enqueued by the fetch-bio service after biographies are written.
 
-**Manual Trigger** (if implemented):
+**Manual Trigger** (optional):
 ```bash
-# Would need to enqueue job via Redis CLI or API
+# Enqueue a traits job directly via Redis
 redis-cli LPUSH "rq:queue:traits" '{"function":"traits.score_person","args":["person-uuid"]}'
 ```
-
-**Or Poll Database** (alternative approach):
-The traits worker could be modified to poll the database directly like resolver/astro do.
 
 ### Step 5: Compute Astro Features
 

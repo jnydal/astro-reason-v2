@@ -70,7 +70,7 @@ All along, PostgreSQL is the source of truth for people, births, bios, traits, e
 
 | Component | Description |
 |----------|-------------|
-| API (FastAPI) | Uploads, triggers jobs, serves results |
+| API (Kotlin/Ktor) | Uploads, triggers jobs, serves results |
 | Worker | NLP + astro computation jobs |
 | **Ollama** (local LLM) | Burlan vector scoring with controlled JSON output |
 | Embeddings service | Semantic vector creation (BGE models) |
