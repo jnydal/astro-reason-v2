@@ -12,6 +12,7 @@ CREATE TABLE birth (
   person_id UUID PRIMARY KEY REFERENCES person_raw(id) ON DELETE CASCADE,
   date DATE,
   time TIME,
+  tz_offset_minutes INT,
   tz TEXT,
   lat DOUBLE PRECISION,
   lon DOUBLE PRECISION

@@ -1,5 +1,6 @@
 fastapi
 pydantic
+pydantic-settings
 psycopg2-binary
 redis
 

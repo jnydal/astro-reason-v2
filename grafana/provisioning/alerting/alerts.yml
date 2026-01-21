@@ -12,6 +12,9 @@ groups:
         data:
           - refId: A
             datasourceUid: postgres
+            relativeTimeRange:
+              from: 3600
+              to: 0
             model:
               editorMode: code
               format: table
@@ -43,6 +46,9 @@ groups:
         data:
           - refId: A
             datasourceUid: postgres
+            relativeTimeRange:
+              from: 3600
+              to: 0
             model:
               editorMode: code
               format: table

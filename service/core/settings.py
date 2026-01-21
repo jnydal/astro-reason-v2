@@ -1,5 +1,6 @@
 # app/core/settings.py
-from pydantic import BaseSettings, AnyHttpUrl, Field
+from pydantic import AnyHttpUrl, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 class Settings(BaseSettings):
@@ -33,8 +34,10 @@ class Settings(BaseSettings):
     SWEPH_EPHE_PATH: Optional[str] = None
     SE_EPHE_PATH: Optional[str] = None
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        extra="ignore",
+    )
 
 settings = Settings()

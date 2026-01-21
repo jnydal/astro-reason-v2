@@ -4,8 +4,16 @@ import psycopg2, psycopg2.extras
 from typing import Iterator, Optional
 from .settings import settings
 
+def _normalize_psycopg2_dsn(dsn: str) -> str:
+    if dsn.startswith("postgresql+psycopg://"):
+        return dsn.replace("postgresql+psycopg://", "postgresql://", 1)
+    if dsn.startswith("postgresql+psycopg2://"):
+        return dsn.replace("postgresql+psycopg2://", "postgresql://", 1)
+    return dsn
+
 def get_conn(dsn: Optional[str] = None):
-    return psycopg2.connect(dsn or settings.PG_DSN)
+    raw_dsn = dsn or settings.PG_DSN
+    return psycopg2.connect(_normalize_psycopg2_dsn(raw_dsn))
 
 @contextmanager
 def pg_conn(dsn: Optional[str] = None) -> Iterator[psycopg2.extensions.connection]:

@@ -380,6 +380,18 @@ def compute_features_for_person(row, backend: str) -> Dict[str, object]:
     }
 
 
+def _birth_has_tz_offset(cur) -> bool:
+    cur.execute("""
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'birth'
+          AND column_name = 'tz_offset_minutes'
+        LIMIT 1
+    """)
+    return cur.fetchone() is not None
+
+
 def run(batch_size: int = 128):
     """
     Process births that don't yet have astro_features.
@@ -391,8 +403,9 @@ def run(batch_size: int = 128):
 
     with pg_conn() as conn, pg_cursor(conn) as cur:
         # Find work
-        cur.execute("""
-            SELECT b.person_id, b.date, b.time, b.tz_offset_minutes, b.lat, b.lon
+        tz_offset_expr = "b.tz_offset_minutes" if _birth_has_tz_offset(cur) else "NULL::int"
+        cur.execute(f"""
+            SELECT b.person_id, b.date, b.time, {tz_offset_expr} AS tz_offset_minutes, b.lat, b.lon
             FROM birth b
             LEFT JOIN astro_features af ON af.person_id = b.person_id
             WHERE af.person_id IS NULL

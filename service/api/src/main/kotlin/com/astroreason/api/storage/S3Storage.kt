@@ -21,6 +21,7 @@ class S3Storage(
         endpoint?.let {
             endpointUrl = Url.parse(it)
         }
+        forcePathStyle = true
         accessKey?.let {
             credentialsProvider = StaticCredentialsProvider(
                 Credentials(it, secretKey ?: "")
