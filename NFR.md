@@ -1,6 +1,6 @@
 # Non-Functional Requirements: Observability
 
-This document describes observability expectations for the astro-reason system.
+This document describes non-functional requirements for the astro-reason system.
 
 ## Goals
 
@@ -8,7 +8,46 @@ This document describes observability expectations for the astro-reason system.
 - Enable rapid detection, diagnosis, and recovery from failures.
 - Support performance tuning and capacity planning.
 
-## Signals
+## Reliability & Resilience
+
+- **Idempotency:** All pipeline stages should safely reprocess the same input without corrupting state.
+- **Retries:** External calls (Wikidata, Wikipedia, Ollama) use bounded retries with backoff.
+- **Failure handling:** Jobs surface clear failure reason and can be re-enqueued safely.
+- **Data integrity:** Writes must be transactional where possible; partial writes should be detectable.
+- **Queue safety:** Workers must tolerate duplicate or out-of-order jobs.
+
+## Performance & Scalability
+
+- **Throughput:** Target steady-state processing with queue backlogs draining within 24 hours.
+- **Batching:** Use batched inserts and vector writes to reduce DB overhead.
+- **Horizontal scaling:** Workers should scale by adding instances per queue.
+- **Resource caps:** Services should run within container memory/CPU limits and degrade gracefully.
+
+## Security
+
+- **AuthN/Z:** API endpoints should require authentication in production.
+- **Secrets:** Credentials must be managed via environment variables or secret store.
+- **Network:** Internal services isolated from public access; only API exposed.
+- **Data access:** Database roles should follow least privilege.
+
+## Data Governance
+
+- **Provenance:** Pipeline actions recorded in `provenance_event` where applicable.
+- **Retention:** Raw XML and biography text retention rules should be defined and enforced.
+- **PII:** If personal data is present, redact or minimize in logs and exports.
+
+## Availability & Recovery
+
+- **Backups:** PostgreSQL backups at least daily with restore verification.
+- **RPO/RTO:** Define recovery point and time objectives per environment.
+- **Graceful degradation:** When external APIs fail, pipeline should pause and resume without data loss.
+
+## Compliance & External Dependencies
+
+- **Terms of use:** Respect Wikidata/Wikipedia usage guidelines and rate limits.
+- **Attribution:** Ensure required attribution is preserved in downstream usage.
+
+## Observability Signals
 
 ### Metrics
 
