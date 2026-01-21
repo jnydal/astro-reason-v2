@@ -1,4 +1,5 @@
 # app/workers/resolve_qid.py
+import time
 import requests, psycopg2, psycopg2.extras
 
 def search_qid(name):
@@ -14,6 +15,7 @@ def dob_matches(qid, dob_iso):
     except Exception: return False
 
 def run(dsn):
+    started = time.monotonic()
     conn = psycopg2.connect(dsn)
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     cur.execute("""
@@ -42,8 +44,19 @@ def run(dsn):
         hits += 1
 
     conn.commit()
-    cur.execute("""INSERT INTO provenance_event (event_type,status,payload)
-                   VALUES ('resolve_qid','ok', jsonb_build_object('resolved',$1))""", (hits,))
+    cur.execute(
+        "INSERT INTO provenance_event (stage, detail) VALUES (%s, %s)",
+        (
+            "resolve_qid",
+            psycopg2.extras.Json(
+                {
+                    "status": "ok",
+                    "count": hits,
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                }
+            ),
+        ),
+    )
     conn.commit(); cur.close(); conn.close()
 
 if __name__ == "__main__":

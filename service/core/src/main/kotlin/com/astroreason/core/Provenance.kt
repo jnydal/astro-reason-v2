@@ -1,11 +1,9 @@
 package com.astroreason.core
 
 import org.jetbrains.exposed.sql.*
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.javatime.timestamp
 import org.jetbrains.exposed.sql.transactions.transaction
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import java.time.Instant
 import java.util.*
@@ -31,13 +29,38 @@ data class ProvenanceEvent(
 fun logProvenanceEvent(
     personId: UUID? = null,
     stage: String,
-    detail: Map<String, Any> = emptyMap()
+    status: String? = null,
+    count: Int? = null,
+    durationMs: Long? = null,
+    error: String? = null,
+    meta: Map<String, String> = emptyMap(),
+    detail: Map<String, String> = emptyMap()
 ) {
     transaction(DatabaseManager.getDatabase()) {
-        val json = Json { ignoreUnknownKeys = true }
-        val detailJson = json.encodeToString(
-            detail.mapValues { it.value.toString() }
-        )
+        val detailJson = buildJsonObject {
+            detail.forEach { (key, value) ->
+                put(key, JsonPrimitive(value))
+            }
+            if (status != null) {
+                put("status", JsonPrimitive(status))
+            }
+            if (count != null) {
+                put("count", JsonPrimitive(count))
+            }
+            if (durationMs != null) {
+                put("duration_ms", JsonPrimitive(durationMs))
+            }
+            if (error != null) {
+                put("error", JsonPrimitive(error))
+            }
+            if (meta.isNotEmpty()) {
+                put("meta", buildJsonObject {
+                    meta.forEach { (key, value) ->
+                        put(key, JsonPrimitive(value))
+                    }
+                })
+            }
+        }.toString()
         
         ProvenanceEvents.insert {
             it[ProvenanceEvents.personId] = personId

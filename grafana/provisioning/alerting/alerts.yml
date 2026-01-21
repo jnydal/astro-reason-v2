@@ -1,0 +1,70 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: pipeline-alerts
+    folder: Astro-Reason
+    interval: 1m
+    rules:
+      - uid: pipeline-stuck
+        title: Pipeline stuck
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: postgres
+            model:
+              editorMode: code
+              format: table
+              rawQuery: true
+              refId: A
+              sql: "SELECT COUNT(*) AS value FROM pipeline_stuck;"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              expression: A
+              refId: B
+              type: reduce
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              expression: "B > 0"
+              refId: C
+              type: math
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Pipeline has stuck records
+          description: At least one person has not progressed within SLA.
+      - uid: pipeline-errors
+        title: Pipeline errors
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: postgres
+            model:
+              editorMode: code
+              format: table
+              rawQuery: true
+              refId: A
+              sql: "SELECT COUNT(*) AS value FROM provenance_event WHERE COALESCE(detail->>'status','ok') = 'error' AND created_at > NOW() - INTERVAL '15 minutes';"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              expression: A
+              refId: B
+              type: reduce
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              expression: "B > 0"
+              refId: C
+              type: math
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Pipeline error events detected
+          description: Errors were logged in the last 15 minutes.

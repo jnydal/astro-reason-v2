@@ -72,6 +72,7 @@ def _enqueue_traits_job(redis: Redis, person_id):
 
 
 def run(dsn, lang="en", limit=500):
+    started = time.monotonic()
     conn = psycopg2.connect(dsn)
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
@@ -139,9 +140,18 @@ def run(dsn, lang="en", limit=500):
         )
 
     cur.execute(
-        """INSERT INTO provenance_event (event_type,status,payload)
-           VALUES ('fetch_bio','ok', jsonb_build_object('written',$1,'lang',$2))""",
-        (wrote, lang),
+        "INSERT INTO provenance_event (stage, detail) VALUES (%s, %s)",
+        (
+            "fetch_bio",
+            psycopg2.extras.Json(
+                {
+                    "status": "ok",
+                    "count": wrote,
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                    "meta": {"lang": lang},
+                }
+            ),
+        ),
     )
 
     conn.commit()

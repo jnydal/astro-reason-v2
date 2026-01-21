@@ -1,7 +1,7 @@
 package com.astroreason.ingest
 
 import com.astroreason.core.Config
-import com.astroreason.core.DatabaseManager
+import com.astroreason.core.logProvenanceEvent
 import com.astroreason.core.queue.Job
 import com.astroreason.core.queue.JobStatus
 import com.astroreason.core.queue.createJobQueue
@@ -24,6 +24,7 @@ fun main() {
         val job = jobQueue.dequeue()
         if (job != null) {
             try {
+                val startedAt = System.nanoTime()
                 jobQueue.updateStatus(job.id, JobStatus.STARTED)
                 
                 when (job.function) {
@@ -35,6 +36,12 @@ fun main() {
                         parseAdbXml(objectUri, meta)
                         
                         jobQueue.updateStatus(job.id, JobStatus.FINISHED, result = "Success")
+                        logProvenanceEvent(
+                            stage = "ingest_job",
+                            status = "ok",
+                            durationMs = (System.nanoTime() - startedAt) / 1_000_000,
+                            meta = mapOf("job_id" to job.id, "function" to job.function)
+                        )
                     }
                     else -> {
                         throw IllegalArgumentException("Unknown function: ${job.function}")
@@ -45,6 +52,13 @@ fun main() {
                     job.id, 
                     JobStatus.FAILED, 
                     excInfo = e.message
+                )
+                logProvenanceEvent(
+                    stage = "ingest_job",
+                    status = "error",
+                    durationMs = null,
+                    error = e.message ?: "unknown_error",
+                    meta = mapOf("job_id" to job.id, "function" to job.function)
                 )
                 e.printStackTrace()
             }

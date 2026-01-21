@@ -2,6 +2,7 @@ package com.astroreason.astro
 
 import com.astroreason.core.Config
 import com.astroreason.core.DatabaseManager
+import com.astroreason.core.logProvenanceEvent
 import com.astroreason.core.schema.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -453,6 +454,7 @@ fun run(batchSize: Int = 128) {
     val settings = Config.settings
     val backend = settings.astroBackend.lowercase()
     val effectiveBackend = if (backend == "swisseph") "swisseph" else "fallback"
+    val startedAt = System.nanoTime()
 
     transaction(DatabaseManager.getDatabase()) {
         val rows = Birth
@@ -509,6 +511,13 @@ fun run(batchSize: Int = 128) {
         
         commit()
         println("✅ astro_features: wrote $wrote rows using backend=$effectiveBackend")
+        logProvenanceEvent(
+            stage = "astro",
+            status = "ok",
+            count = wrote,
+            durationMs = (System.nanoTime() - startedAt) / 1_000_000,
+            meta = mapOf("backend" to effectiveBackend, "batch_size" to batchSize.toString())
+        )
     }
 }
 

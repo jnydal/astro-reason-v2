@@ -178,6 +178,29 @@ Each processing step logs a provenance record for reproducibility.
 
 ---
 
+## Observability
+
+Grafana dashboards are provisioned automatically from `grafana/` when you run
+`docker compose up`. The default Grafana login is `admin` / `admin` and the
+PostgreSQL datasource points at the local `db` container.
+
+Dashboards:
+- `Pipeline Observability` provides counts for people, traits, embeddings, astro
+  features, and correlation placeholders, plus throughput and stuck-job views.
+
+Alerts:
+- `Pipeline stuck` triggers when any record has not progressed within the 24h SLA.
+- `Pipeline errors` triggers when error events appear in the last 15 minutes.
+
+Runbook:
+- If `Pipeline stuck` fires, inspect `pipeline_stuck` to see which stages are missing.
+- If `Pipeline errors` fires, review recent `provenance_event` rows with
+  `detail->>'status' = 'error'` and check worker logs.
+- Adjust SLA/thresholds by editing `infra/sql/003_observability.sql` and
+  `grafana/provisioning/alerting/alerts.yml`.
+
+---
+
 ## License
 
 For research use only. External datasets must follow their respective licenses.

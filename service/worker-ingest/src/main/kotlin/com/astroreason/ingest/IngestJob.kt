@@ -21,7 +21,7 @@ import kotlin.io.path.deleteIfExists
 
 fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
     require(objectUri.startsWith("s3://")) { "Expected s3://bucket/key" }
-    
+    val startedAt = System.nanoTime()
     val (bucket, key) = objectUri.removePrefix("s3://").split("/", limit = 2)
     val source = meta["source"] ?: "astrodb-upload"
     
@@ -174,7 +174,23 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
         // Note: semantic embeddings are now triggered after wiki enrichment
         // from the fetch-bio service, to ensure they run on full biographies.
         println("✅ Parsed $recordsSeen records, upserted ${touchedPids.size} people")
+        logProvenanceEvent(
+            stage = "ingest",
+            status = "ok",
+            count = touchedPids.size,
+            durationMs = (System.nanoTime() - startedAt) / 1_000_000,
+            meta = mapOf("source" to source, "object_uri" to objectUri)
+        )
         
+    } catch (e: Exception) {
+        logProvenanceEvent(
+            stage = "ingest",
+            status = "error",
+            durationMs = (System.nanoTime() - startedAt) / 1_000_000,
+            error = e.message ?: "unknown_error",
+            meta = mapOf("source" to source, "object_uri" to objectUri)
+        )
+        throw e
     } finally {
         tempFile.delete()
     }

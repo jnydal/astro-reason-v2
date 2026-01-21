@@ -2,6 +2,7 @@ package com.astroreason.traits
 
 import com.astroreason.core.Config
 import com.astroreason.core.DatabaseManager
+import com.astroreason.core.logProvenanceEvent
 import com.astroreason.core.schema.*
 import com.astroreason.core.queue.*
 import kotlinx.coroutines.runBlocking
@@ -31,6 +32,7 @@ fun main() {
         val job = jobQueue.dequeue()
         if (job != null) {
             try {
+                val startedAt = System.nanoTime()
                 jobQueue.updateStatus(job.id, JobStatus.STARTED)
                 
                 when (job.function) {
@@ -44,6 +46,14 @@ fun main() {
                         }
                         
                         jobQueue.updateStatus(job.id, JobStatus.FINISHED, result = "Success")
+                        logProvenanceEvent(
+                            personId = personId,
+                            stage = "traits",
+                            status = "ok",
+                            count = 1,
+                            durationMs = (System.nanoTime() - startedAt) / 1_000_000,
+                            meta = mapOf("job_id" to job.id)
+                        )
                     }
                     else -> {
                         throw IllegalArgumentException("Unknown function: ${job.function}")
@@ -54,6 +64,12 @@ fun main() {
                     job.id,
                     JobStatus.FAILED,
                     excInfo = e.message
+                )
+                logProvenanceEvent(
+                    stage = "traits",
+                    status = "error",
+                    error = e.message ?: "unknown_error",
+                    meta = mapOf("job_id" to job.id)
                 )
                 e.printStackTrace()
             }

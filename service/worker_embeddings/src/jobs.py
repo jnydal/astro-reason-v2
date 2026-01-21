@@ -1,5 +1,6 @@
 # embeddings/jobs.py
 import os
+import time
 from datetime import datetime
 
 import numpy as np
@@ -15,12 +16,26 @@ DSN = os.getenv("DATABASE_URL", "").replace("postgresql+psycopg://", "postgresql
 
 def embed_person_bios(payload: dict):
     """RQ job: Embed bios for given person_ids and upsert into embeddings table."""
+    started = time.monotonic()
     person_ids = payload.get("person_ids") or []
     model_name = payload.get("model", EMBED_MODEL)
     source = payload.get("source", "astrodb-upload")
 
     if not person_ids:
         print("⚠️ No person_ids provided to embed_person_bios.")
+        conn = psycopg2.connect(DSN)
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        log_event(
+            cur,
+            stage="embeddings",
+            status="error",
+            count=0,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            error="no_person_ids",
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
         return {"status": "no_ids"}
 
     print(f"Embedding {len(person_ids)} bios using {model_name}...")
@@ -43,7 +58,17 @@ def embed_person_bios(payload: dict):
     todo = [r for r in rows if not r["existing_hash"] or r["existing_hash"] != r["text_hash"]]
     if not todo:
         print("No new or changed bios to embed.")
-        cur.close(); conn.close()
+        log_event(
+            cur,
+            stage="embeddings",
+            status="ok",
+            count=0,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            meta={"model": model_name, "source": source},
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
         return {"status": "noop", "count": 0}
 
     texts = [r["text"] for r in todo]
@@ -80,12 +105,19 @@ def embed_person_bios(payload: dict):
 
     conn.commit()
 
-    # Optional provenance logging
-    log_event(cur, event_type="embed_bio", status="ok", payload={
-        "model": model_name,
-        "count": len(todo),
-        "timestamp": datetime.utcnow().isoformat()
-    })
+    # Provenance logging
+    log_event(
+        cur,
+        stage="embeddings",
+        status="ok",
+        count=len(todo),
+        duration_ms=int((time.monotonic() - started) * 1000),
+        meta={
+            "model": model_name,
+            "source": source,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
     conn.commit()
     cur.close(); conn.close()
 
