@@ -1,17 +1,6 @@
 Recommended Next Steps (Priority Order)
 
-1. Embeddings DB coherence + migration handling (CORE PIPELINE)
-- Ensure embeddings schema matches worker writes (text_hash, meta, source, updated_at)
-- Confirm `pgvector` extension is available and migrations are actually applied
-- Insert routing: worker now writes directly to `embeddings_384/768/1024/1536` tables
-  - Avoids `ON CONFLICT` upserts against the `embeddings` view
-
-2. Pipeline Monitoring & Observability (NICE TO HAVE)
-- Add metrics for pipeline completion rates
-- Dashboard showing: people processed, traits scored, embeddings computed, correlations computed
-- Alerting for stuck jobs or failures
-
-3. Implement Statistical Analysis Service (CORE PURPOSE)
+1. Implement Statistical Analysis Service (CORE PURPOSE)
 This is the final step. Create a new service or add endpoints to:
 
 Features needed:
@@ -25,3 +14,11 @@ Implementation approach:
 - New Kotlin service `service/stats` or add endpoints to API
 - Use Kotlin statistics libraries (e.g., `org.apache.commons:commons-math3`)
 - Or call Python via HTTP (scipy, pandas, scikit-learn)
+
+2. Embeddings DB coherence + migration handling (CORE PIPELINE)
+- Ensure embeddings schema matches worker writes (text_hash, meta, source, updated_at)
+- Confirm `pgvector` extension is available and migrations are actually applied
+- Insert routing: worker now writes directly to `embeddings_384/768/1024/1536` tables
+  - Avoids `ON CONFLICT` upserts against the `embeddings` view
+
+  
