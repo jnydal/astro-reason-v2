@@ -25,7 +25,7 @@ services:
   astro:
     build:
       context: .
-      dockerfile: service/astro/Dockerfile
+      dockerfile: service/astro/Dockerfile.python
     environment:
       PG_DSN: postgresql://postgres:postgres@db:5432/astro_reason
       SE_EPHE_PATH: /opt/ephe

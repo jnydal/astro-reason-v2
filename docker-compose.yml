@@ -118,7 +118,7 @@ services:
   astro:
     build:
       context: .
-      dockerfile: ./service/astro/Dockerfile
+      dockerfile: ./service/astro/Dockerfile.python
     env_file: ./.env
     environment:
       PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}

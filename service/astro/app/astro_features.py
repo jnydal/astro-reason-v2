@@ -28,8 +28,10 @@ from typing import Dict, List, Tuple, Optional
 import numpy as np
 import psycopg2.extras
 
-from app.core.db import pg_conn, pg_cursor
-from app.core.settings import settings
+import os
+
+from service.core.db import pg_conn, pg_cursor
+from service.core.settings import settings
 
 # ---------------------------
 # Backend selection
@@ -330,9 +332,15 @@ def compute_features_for_person(row, backend: str) -> Dict[str, object]:
 
     # --- longitudes & houses
     if backend == "swisseph":
-        if getattr(settings, "SWEPH_EPHE_PATH", None):
-            swe.set_ephe_path(settings.SWEPH_EPHE_PATH)  # optional ephemeris dir
-        longs = swe_planet_longitudes(jd, SweConfig(eph_path=getattr(settings, "SWEPH_EPHE_PATH", None)))
+        ephe_path = (
+            getattr(settings, "SWEPH_EPHE_PATH", None)
+            or getattr(settings, "SE_EPHE_PATH", None)
+            or os.getenv("SWEPH_EPHE_PATH")
+            or os.getenv("SE_EPHE_PATH")
+        )
+        if ephe_path:
+            swe.set_ephe_path(ephe_path)  # optional ephemeris dir
+        longs = swe_planet_longitudes(jd, SweConfig(eph_path=ephe_path))
         houses = None
         placements = None
         if row["lat"] is not None and row["lon"] is not None:

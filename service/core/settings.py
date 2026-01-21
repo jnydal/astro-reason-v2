@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # Wikipedia
     WIKI_LANG_DEFAULT: str = "en"
 
+    # Astro
+    SWEPH_EPHE_PATH: Optional[str] = None
+    SE_EPHE_PATH: Optional[str] = None
+
     class Config:
         env_file = ".env"
         case_sensitive = False

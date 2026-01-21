@@ -2,7 +2,7 @@
 from contextlib import contextmanager
 import psycopg2, psycopg2.extras
 from typing import Iterator, Optional
-from app.core.settings import settings
+from .settings import settings
 
 def get_conn(dsn: Optional[str] = None):
     return psycopg2.connect(dsn or settings.PG_DSN)
