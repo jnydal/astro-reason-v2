@@ -21,6 +21,9 @@ dependencies {
     // AWS SDK
     implementation("aws.sdk.kotlin:s3:1.0.21")
     
+    // Statistics
+    implementation("org.apache.commons:commons-math3:3.6.1")
+
     // Logging
     implementation("ch.qos.logback:logback-classic:1.4.14")
     

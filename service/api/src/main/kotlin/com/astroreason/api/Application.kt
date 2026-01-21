@@ -3,6 +3,7 @@ package com.astroreason.api
 import com.astroreason.api.models.*
 import com.astroreason.api.storage.createS3Storage
 import com.astroreason.api.jobs.ApiJobQueue
+import com.astroreason.api.stats.*
 import com.astroreason.core.Config
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
@@ -119,6 +120,100 @@ fun Application.module() {
                 excInfo = job.excInfo,
                 result = job.result
             ))
+        }
+
+        route("/stats") {
+            get("/correlation") {
+                val limit = call.request.queryParameters["limit"]?.toIntOrNull()
+                val minSamples = call.request.queryParameters["minSamples"]?.toIntOrNull() ?: 3
+                val rows = loadNlpAstroRows(limit)
+                call.respond(buildCorrelationResponse(rows, minSamples))
+            }
+
+            get("/feature-importance") {
+                val limit = call.request.queryParameters["limit"]?.toIntOrNull()
+                val minSamples = call.request.queryParameters["minSamples"]?.toIntOrNull() ?: 3
+                val rows = loadNlpAstroRows(limit)
+                call.respond(buildFeatureImportance(rows, minSamples))
+            }
+
+            get("/clusters") {
+                val limit = call.request.queryParameters["limit"]?.toIntOrNull()
+                val k = call.request.queryParameters["k"]?.toIntOrNull() ?: 5
+                val model = call.request.queryParameters["model"]
+                if (k < 2) {
+                    call.respond(HttpStatusCode.BadRequest, "k must be >= 2")
+                    return@get
+                }
+
+                val rows = loadEmbeddingAstroRows(limit, model)
+                if (rows.isEmpty()) {
+                    call.respond(
+                        ClusterResponse(
+                            k = k,
+                            n = 0,
+                            embeddingDim = 0,
+                            astroFeatureOrder = emptyList(),
+                            assignments = emptyList(),
+                            centroids = emptyList()
+                        )
+                    )
+                    return@get
+                }
+
+                val astroFeatureOrder = rows
+                    .map { it.astro.keys.toSet() }
+                    .reduce { acc, keys -> acc.intersect(keys) }
+                    .sorted()
+
+                if (astroFeatureOrder.isEmpty()) {
+                    call.respond(HttpStatusCode.BadRequest, "No shared astro features available")
+                    return@get
+                }
+
+                val eligible = rows.filter { row -> astroFeatureOrder.all { it in row.astro } }
+                if (eligible.size < k) {
+                    call.respond(HttpStatusCode.BadRequest, "Not enough rows for k=$k")
+                    return@get
+                }
+
+                call.respond(buildClusterResponse(eligible, k, astroFeatureOrder))
+            }
+
+            get("/export") {
+                val limit = call.request.queryParameters["limit"]?.toIntOrNull()
+                val format = call.request.queryParameters["format"]?.lowercase() ?: "json"
+                val clusterK = call.request.queryParameters["clusterK"]?.toIntOrNull()
+                val clusterModel = call.request.queryParameters["clusterModel"]
+                val rows = loadNlpAstroRows(limit)
+
+                val clusterAssignments = if (clusterK != null && clusterK >= 2) {
+                    val clusterRows = loadEmbeddingAstroRows(limit, clusterModel)
+                    val astroFeatureOrder = clusterRows
+                        .map { it.astro.keys.toSet() }
+                        .reduceOrNull { acc, keys -> acc.intersect(keys) }
+                        ?.sorted()
+                        ?: emptyList()
+
+                    if (astroFeatureOrder.isNotEmpty() && clusterRows.size >= clusterK) {
+                        val response = buildClusterResponse(clusterRows, clusterK, astroFeatureOrder)
+                        response.assignments.associate { UUID.fromString(it.personId) to it.cluster }
+                    } else {
+                        emptyMap()
+                    }
+                } else {
+                    emptyMap()
+                }
+
+                val export = buildExportResponse(rows, clusterAssignments)
+
+                if (format == "csv") {
+                    val csv = buildExportCsv(export, includeClusters = clusterAssignments.isNotEmpty())
+                    call.respondText(csv, ContentType.Text.CSV)
+                } else {
+                    call.respond(export)
+                }
+            }
         }
     }
 }
