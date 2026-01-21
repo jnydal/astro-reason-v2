@@ -3,10 +3,10 @@ WORKDIR /app
 COPY build.gradle.kts settings.gradle.kts ./
 COPY service/core ./service/core
 COPY service/api ./service/api
-RUN gradle :service:api:build --no-daemon
+RUN gradle :service:api:installDist --no-daemon
 
 FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
-COPY --from=build /app/service/api/build/libs/*.jar app.jar
+COPY --from=build /app/service/api/build/install/api /app
 EXPOSE 8000
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["/app/bin/api"]

@@ -3,8 +3,8 @@ Recommended Next Steps (Priority Order)
 1. Embeddings DB coherence + migration handling (CORE PIPELINE)
 - Ensure embeddings schema matches worker writes (text_hash, meta, source, updated_at)
 - Confirm `pgvector` extension is available and migrations are actually applied
-- Validate insert routing for `embeddings` view with `ON CONFLICT` behavior
-  - If upserts against the view fail, write to dimensioned tables directly
+- Insert routing: worker now writes directly to `embeddings_384/768/1024/1536` tables
+  - Avoids `ON CONFLICT` upserts against the `embeddings` view
 
 2. Pipeline Monitoring & Observability (NICE TO HAVE)
 - Add metrics for pipeline completion rates

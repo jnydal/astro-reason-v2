@@ -4,6 +4,7 @@ from datetime import datetime
 
 import numpy as np
 import psycopg2, psycopg2.extras
+from psycopg2 import sql
 from pgvector.psycopg2 import register_vector
 from sentence_transformers import SentenceTransformer
 
@@ -55,23 +56,27 @@ def embed_person_bios(payload: dict):
     )
     embeddings = np.array(embeddings, dtype=np.float32)
 
-    # Upsert into embeddings table
+    # Upsert into dimensioned embeddings table
     for pid, vec, row in zip(pids, embeddings, todo):
         dim = int(len(vec))
         if dim not in (384, 768, 1024, 1536):
             print(f"⚠️ Unsupported embedding dimension {dim} for person_id={pid}. Skipping.")
             continue
-        cur.execute("""
-            INSERT INTO embeddings (person_id, model_name, dim, vector, text_hash, meta, source, updated_at)
-            VALUES (%s, %s, %s, %s, %s, jsonb_build_object('provider','sentence-transformers'), %s, NOW())
-            ON CONFLICT (person_id, model_name) DO UPDATE
-              SET dim = EXCLUDED.dim,
-                  vector = EXCLUDED.vector,
-                  text_hash = EXCLUDED.text_hash,
-                  meta = EXCLUDED.meta,
-                  source = EXCLUDED.source,
-                  updated_at = NOW()
-        """, (pid, model_name, dim, vec, row["text_hash"], source))
+        table_name = f"embeddings_{dim}"
+        cur.execute(
+            sql.SQL("""
+                INSERT INTO {table} (person_id, model_name, dim, vector, text_hash, meta, source, updated_at)
+                VALUES (%s, %s, %s, %s, %s, jsonb_build_object('provider','sentence-transformers'), %s, NOW())
+                ON CONFLICT (person_id, model_name) DO UPDATE
+                  SET dim = EXCLUDED.dim,
+                      vector = EXCLUDED.vector,
+                      text_hash = EXCLUDED.text_hash,
+                      meta = EXCLUDED.meta,
+                      source = EXCLUDED.source,
+                      updated_at = NOW()
+            """).format(table=sql.Identifier(table_name)),
+            (pid, model_name, dim, vec, row["text_hash"], source),
+        )
 
     conn.commit()
 

@@ -3,7 +3,7 @@ WORKDIR /app
 COPY build.gradle.kts settings.gradle.kts ./
 COPY service/core ./service/core
 COPY service/astro ./service/astro
-RUN gradle :service:astro:build --no-daemon
+RUN gradle :service:astro:installDist --no-daemon
 
 FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
@@ -15,5 +15,5 @@ RUN mkdir -p /opt/ephe && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 ENV SE_EPHE_PATH=/opt/ephe
-COPY --from=build /app/service/astro/build/libs/*.jar app.jar
-ENTRYPOINT ["java", "-jar", "app.jar"]
+COPY --from=build /app/service/astro/build/install/astro /app
+ENTRYPOINT ["/app/bin/astro"]
