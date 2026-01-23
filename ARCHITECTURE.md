@@ -310,7 +310,6 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 ## Future Enhancements
 
 1. **Swiss Ephemeris JNI**: Full implementation for accurate astro calculations
-3. **API Authentication**: Add auth for production
 4. **Metrics Export**: Prometheus integration
 5. **Distributed Tracing**: OpenTelemetry support
 6. **Statistical Analysis**: Correlation computation service
