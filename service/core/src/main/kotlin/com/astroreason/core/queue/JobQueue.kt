@@ -8,7 +8,9 @@ import com.astroreason.core.schema.JobStatusTable
 import kotlinx.serialization.decodeFromString
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.clients.consumer.KafkaConsumer
+import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.clients.producer.ProducerConfig
+import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.kafka.common.serialization.StringSerializer
 import org.jetbrains.exposed.sql.*
@@ -31,6 +33,13 @@ data class Job(
     val endedAt: Long? = null,
     val result: String? = null,
     val excInfo: String? = null
+)
+
+data class JobEnvelope(
+    val job: Job,
+    val topic: String,
+    val partition: Int,
+    val offset: Long
 )
 
 enum class JobStatus {
@@ -65,6 +74,7 @@ class JobQueue(
             props[ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG] = bootstrapServers
             props[ConsumerConfig.GROUP_ID_CONFIG] = gid
             props[ConsumerConfig.AUTO_OFFSET_RESET_CONFIG] = "earliest"
+            props[ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG] = false
             props[ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
             props[ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
             KafkaConsumer<String, String>(props).apply {
@@ -120,7 +130,7 @@ class JobQueue(
         }
     }
 
-    fun dequeue(): Job? {
+    fun dequeue(): JobEnvelope? {
         val kafkaConsumer = consumer ?: return null
         val records = kafkaConsumer.poll(Duration.ofSeconds(5))
         if (records.isEmpty) {
@@ -128,7 +138,21 @@ class JobQueue(
         }
 
         val record = records.first()
-        return json.decodeFromString(record.value())
+        val job = json.decodeFromString<Job>(record.value())
+        return JobEnvelope(
+            job = job,
+            topic = record.topic(),
+            partition = record.partition(),
+            offset = record.offset()
+        )
+    }
+
+    fun ack(envelope: JobEnvelope) {
+        val kafkaConsumer = consumer ?: return
+        val topicPartition = TopicPartition(envelope.topic, envelope.partition)
+        kafkaConsumer.commitSync(
+            mapOf(topicPartition to OffsetAndMetadata(envelope.offset + 1))
+        )
     }
 
     fun updateStatus(jobId: String, status: JobStatus, result: String? = null, excInfo: String? = null) {

@@ -32,8 +32,9 @@ fun main() {
     println("Trait worker started, listening for jobs...")
     
     while (true) {
-        val job = jobQueue.dequeue()
-        if (job != null) {
+        val envelope = jobQueue.dequeue()
+        if (envelope != null) {
+            val job = envelope.job
             try {
                 val startedAt = System.nanoTime()
                 jobQueue.updateStatus(job.id, JobStatus.STARTED)
@@ -75,6 +76,8 @@ fun main() {
                     meta = mapOf("job_id" to job.id)
                 )
                 e.printStackTrace()
+            } finally {
+                jobQueue.ack(envelope)
             }
         }
     }

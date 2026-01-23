@@ -2,7 +2,6 @@ package com.astroreason.ingest
 
 import com.astroreason.core.Config
 import com.astroreason.core.logProvenanceEvent
-import com.astroreason.core.queue.Job
 import com.astroreason.core.queue.JobStatus
 import com.astroreason.core.queue.createJobQueue
 import kotlinx.serialization.json.Json
@@ -24,8 +23,9 @@ fun main() {
     println("Worker started, listening for jobs...")
     
     while (true) {
-        val job = jobQueue.dequeue()
-        if (job != null) {
+        val envelope = jobQueue.dequeue()
+        if (envelope != null) {
+            val job = envelope.job
             try {
                 val startedAt = System.nanoTime()
                 jobQueue.updateStatus(job.id, JobStatus.STARTED)
@@ -64,6 +64,8 @@ fun main() {
                     meta = mapOf("job_id" to job.id, "function" to job.function)
                 )
                 e.printStackTrace()
+            } finally {
+                jobQueue.ack(envelope)
             }
         }
     }
