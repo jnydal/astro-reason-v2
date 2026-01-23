@@ -44,24 +44,21 @@ async def ingest_astrodatabank(xml: UploadFile = File(...)):
 
     object_uri = storage.put_bytes("adb-uploads", content, content_type="application/xml")
     job = jobs.enqueue_parse_adb_xml(object_uri, source_label="astrodb-upload")
-    return IngestResponse(job_id=job.id, object_uri=object_uri)
+    return IngestResponse(job_id=job["id"], object_uri=object_uri)
 
 @app.get("/jobs/{job_id}")
 def job_status(job_id: str):
     # lightweight polling endpoint (optional but handy)
-    from rq.job import Job
-    from rq.exceptions import NoSuchJobError
-    try:
-        job = Job.fetch(job_id, connection=jobs.redis)
-    except NoSuchJobError:
+    job = jobs.fetch_job_status(job_id)
+    if not job:
         raise HTTPException(404, detail="job not found")
 
     return JSONResponse({
-        "id": job.id,
-        "status": job.get_status(),
-        "enqueued_at": str(job.enqueued_at) if job.enqueued_at else None,
-        "started_at": str(job.started_at) if job.started_at else None,
-        "ended_at": str(job.ended_at) if job.ended_at else None,
-        "exc_info": job.exc_info,
-        "result": job.result if job.is_finished else None,
+        "id": str(job["id"]),
+        "status": job["status"].lower() if job["status"] else "unknown",
+        "enqueued_at": str(job["enqueued_at"]) if job.get("enqueued_at") else None,
+        "started_at": str(job["started_at"]) if job.get("started_at") else None,
+        "ended_at": str(job["ended_at"]) if job.get("ended_at") else None,
+        "exc_info": job.get("exc_info"),
+        "result": job.get("result"),
     })

@@ -48,22 +48,22 @@ Stats + correlation visualization
 ### Detailed flow
 
 Input & Ingest:
-AstroDatabank XML is uploaded → API enqueues a job on the `default` Redis queue → Kotlin ingest worker (`worker-ingest`) reads from `default`, parses XML, and writes to PostgreSQL (`person_raw`, `birth`, initial `bio_text` stubs).
+AstroDatabank XML is uploaded → API enqueues a job on the `default` Kafka topic → Kotlin ingest worker (`worker-ingest`) reads from `default`, parses XML, and writes to PostgreSQL (`person_raw`, `birth`, initial `bio_text` stubs).
 
 Wikidata / Wikipedia enrichment:
 Resolver service (no queue; DB polling) takes name + date of birth → resolves a Wikidata QID → stores it → calls the `fetch-bio` Python service → Wikipedia biography text is written into `bio_text`. After each successful update, `fetch-bio` enqueues downstream jobs.
 
-Embeddings (semantic) – queue: `embeddings`:
-After wiki enrichment, the `fetch-bio` service enqueues batched jobs on the `embeddings` Redis queue → Python embeddings worker pulls from `embeddings` → computes sentence-transformer embeddings → stores vectors in `embeddings_*` tables in PostgreSQL.
+Embeddings (semantic) – topic: `embeddings`:
+After wiki enrichment, the `fetch-bio` service enqueues batched jobs on the `embeddings` Kafka topic → Python embeddings worker pulls from `embeddings` → computes sentence-transformer embeddings → stores vectors in `embeddings_*` tables in PostgreSQL.
 
-Yuri Burlan scoring (traits) – queue: `traits`:
-The traits worker is implemented (Kotlin + local LLM) and listens on the `traits` Redis queue; after wiki enrichment, `fetch-bio` enqueues `"traits.score_person"` jobs for each enriched person, and the worker reads biography text from `bio_text` and writes 8‑vector traits into `nlp_vectors`.
+Yuri Burlan scoring (traits) – topic: `traits`:
+The traits worker is implemented (Kotlin + local LLM) and listens on the `traits` Kafka topic; after wiki enrichment, `fetch-bio` enqueues `"traits.score_person"` jobs for each enriched person, and the worker reads biography text from `bio_text` and writes 8‑vector traits into `nlp_vectors`.
 
 Astrological encoding / astro features:
 The astro service (no queue; DB polling) scans for births without `astro_features`, computes ephemeris‑based features (currently via a fallback backend, with Swiss Ephemeris JNI planned) and stores structured astro features + a flat numeric feature vector in `astro_features`.
 
 Storage & analysis:
-All along, PostgreSQL is the source of truth for people, births, bios, traits, embeddings, and astro features. Redis is used as the job queue between steps (`default` → ingest, `embeddings` for semantic vectors after wiki enrichment, `traits` for Burlan scoring). From there you can query/visualize/analyze whenever you like.
+All along, PostgreSQL is the source of truth for people, births, bios, traits, embeddings, and astro features. Kafka is used as the job queue between steps (`default` → ingest, `embeddings` for semantic vectors after wiki enrichment, `traits` for Burlan scoring). From there you can query/visualize/analyze whenever you like.
 
 
 ### System Components
@@ -75,7 +75,7 @@ All along, PostgreSQL is the source of truth for people, births, bios, traits, e
 | **Ollama** (local LLM) | Burlan vector scoring with controlled JSON output |
 | Embeddings service | Semantic vector creation (BGE models) |
 | PostgreSQL + pgvector | Data and vector storage |
-| Redis | Job queue |
+| Kafka | Job queue |
 | MinIO | Raw biography text object storage |
 | Grafana (optional) | Metrics |
 

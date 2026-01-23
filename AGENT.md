@@ -61,11 +61,11 @@ curl -X POST http://localhost:8002/fetch-bio \
 
 ### 3. Worker Services
 
-Workers run continuously and process jobs from Redis queues:
+Workers run continuously and process jobs from Kafka topics:
 
-- **worker-ingest**: Processes `default` queue
-- **embeddings**: Processes `embeddings` queue (Python)
-- **traits**: Processes `traits` queue
+- **worker-ingest**: Processes `default` topic
+- **embeddings**: Processes `embeddings` topic (Python)
+- **traits**: Processes `traits` topic
 - **resolver**: Polls database directly
 - **astro**: Polls database directly
 
@@ -80,8 +80,8 @@ Create `.env` file:
 DATABASE_URL=postgresql://postgres:postgres@db:5432/astro_reason
 PG_DSN=postgresql://postgres:postgres@db:5432/astro_reason
 
-# Redis
-REDIS_URL=redis://redis:6379/0
+# Kafka
+KAFKA_BOOTSTRAP_SERVERS=kafka:9092
 
 # MinIO
 MINIO_ENDPOINT=http://minio:9000

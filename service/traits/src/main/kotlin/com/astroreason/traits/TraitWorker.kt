@@ -16,9 +16,12 @@ fun main() {
     Config.initialize()
     
     val settings = Config.settings
+    val groupId = System.getenv("KAFKA_GROUP_ID") ?: "traits-worker"
     val jobQueue = createJobQueue(
-        settings.redisUrl ?: "redis://redis:6379/0",
-        "traits"
+        settings.kafkaBootstrapServers,
+        "traits",
+        groupId = groupId,
+        clientId = "traits-worker"
     )
     
     val scorer = TraitScorer(

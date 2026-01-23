@@ -13,9 +13,12 @@ fun main() {
     Config.initialize()
     
     val settings = Config.settings
+    val groupId = System.getenv("KAFKA_GROUP_ID") ?: "worker-ingest"
     val jobQueue = createJobQueue(
-        settings.redisUrl ?: "redis://redis:6379/0",
-        "default"
+        settings.kafkaBootstrapServers,
+        "default",
+        groupId = groupId,
+        clientId = "worker-ingest"
     )
     
     println("Worker started, listening for jobs...")

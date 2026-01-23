@@ -36,7 +36,7 @@ services:
       ASTRO_URL:    http://astro:8080
       RESOLVER_URL: http://resolver:8080
       INGEST_URL:   http://ingest:8080
-      # add DB / MinIO / Redis URLs if your tests touch them
+      # add DB / MinIO / Kafka URLs if your tests touch them
       # DATABASE_URL: postgres://postgres:postgres@db:5432/postgres
       # MINIO_ENDPOINT: http://minio:9000
     command: >

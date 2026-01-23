@@ -7,8 +7,10 @@ import com.astroreason.core.Config
 
 class ApiJobQueue {
     private val jobQueue: JobQueue = createJobQueue(
-        Config.settings.redisUrl ?: "redis://redis:6379/0",
-        "default"
+        Config.settings.kafkaBootstrapServers,
+        "default",
+        groupId = null,
+        clientId = "api-producer"
     )
 
     fun enqueueParseAdbXml(objectUri: String, sourceLabel: String = "upload"): Job {

@@ -1,18 +1,25 @@
 # worker/ingest.py
-import os, hashlib, tempfile
+import json
+import os
+import hashlib
+import tempfile
+import time
+import uuid
 import boto3
 from botocore.config import Config
 import psycopg2, psycopg2.extras
 from psycopg2.extras import execute_values
-from redis import Redis
-from rq import Queue
+from confluent_kafka import Consumer, Producer
 
 from app.utils.adb_parser_stream import iter_people
 
 UPSERT_BATCH   = 500
 ENQUEUE_BATCH  = 200
 EMBED_MODEL    = os.getenv("EMBEDDINGS_MODEL", "BAAI/bge-large-en-v1.5")
-REDIS_URL      = os.getenv("REDIS_URL", "redis://redis:6379/0")
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+EMBED_TOPIC     = os.getenv("KAFKA_EMBEDDINGS_TOPIC", "embeddings")
+DEFAULT_TOPIC   = os.getenv("KAFKA_DEFAULT_TOPIC", "default")
+KAFKA_GROUP_ID  = os.getenv("KAFKA_GROUP_ID", "worker-ingest-python")
 
 def _s3():
     return boto3.client(
@@ -23,6 +30,58 @@ def _s3():
         region_name=os.getenv("MINIO_REGION", "us-east-1"),
         config=Config(connect_timeout=2, read_timeout=30, retries={"max_attempts": 3}),
     )
+
+def _producer() -> Producer:
+    return Producer({"bootstrap.servers": KAFKA_BOOTSTRAP, "client.id": "worker-ingest"})
+
+def _insert_job_status(cur, job: dict) -> None:
+    cur.execute(
+        """
+        INSERT INTO job_status
+            (id, function, status, args_json, kwargs_json, enqueued_at)
+        VALUES
+            (%s, %s, %s, %s, %s, %s)
+        """,
+        (
+            job["id"],
+            job["function"],
+            job["status"],
+            psycopg2.extras.Json(job.get("args", [])),
+            psycopg2.extras.Json(job.get("kwargs", {})),
+            job["enqueuedAt"],
+        ),
+    )
+
+def _update_job_status(job_id: str, status: str, result: str | None = None, exc_info: str | None = None) -> None:
+    dsn = os.getenv("DATABASE_URL", "").replace("postgresql+psycopg://", "postgresql://")
+    if not dsn:
+        return
+    conn = psycopg2.connect(dsn)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE job_status
+           SET status = %s,
+               started_at = COALESCE(started_at, %s),
+               ended_at = CASE WHEN %s IN ('FINISHED', 'FAILED') THEN %s ELSE ended_at END,
+               result = %s,
+               exc_info = %s,
+               updated_at = NOW()
+         WHERE id = %s
+        """,
+        (
+            status,
+            int(time.time() * 1000),
+            status,
+            int(time.time() * 1000),
+            result,
+            exc_info,
+            job_id,
+        ),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def _sha256(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
@@ -128,23 +187,34 @@ def parse_adb_xml(object_uri: str, meta: dict):
     # final flush & commit before enqueue
     flush_batches()
     conn.commit()
-    cur.close(); conn.close()
-
-    # --- Enqueue embedding jobs on the "embeddings" queue ---
+    # --- Enqueue embedding jobs on Kafka ---
     jobs_enqueued = 0
     if touched_pids:
-        redis = Redis.from_url(REDIS_URL)
-        q = Queue("embeddings", connection=redis)  # <— embeddings queue
+        producer = _producer()
         pids = list(touched_pids)
         for i in range(0, len(pids), ENQUEUE_BATCH):
             batch = pids[i:i + ENQUEUE_BATCH]
-            q.enqueue(
-                "embeddings.jobs.embed_person_bios",  # dotted path in embeddings worker
-                {"person_ids": batch, "model": EMBED_MODEL, "source": source},
-                job_timeout=1800,
-                retry_strategy={"max": 3, "interval": 30},
-            )
+            job_id = str(uuid.uuid4())
+            now_ms = int(time.time() * 1000)
+            job = {
+                "id": job_id,
+                "function": "embeddings.embed_person_bios",
+                "args": [],
+                "kwargs": {"person_ids": batch, "model": EMBED_MODEL, "source": source},
+                "status": "QUEUED",
+                "enqueuedAt": now_ms,
+                "startedAt": None,
+                "endedAt": None,
+                "result": None,
+                "excInfo": None,
+            }
+            _insert_job_status(cur, job)
+            producer.produce(EMBED_TOPIC, key=job_id, value=json.dumps(job))
             jobs_enqueued += 1
+        producer.flush()
+        conn.commit()
+
+    cur.close(); conn.close()
 
     return {
         "bytes": len(data),
@@ -154,3 +224,50 @@ def parse_adb_xml(object_uri: str, meta: dict):
         "object_uri": object_uri,
         "source": source,
     }
+
+
+def _consume_loop():
+    consumer = Consumer(
+        {
+            "bootstrap.servers": KAFKA_BOOTSTRAP,
+            "group.id": KAFKA_GROUP_ID,
+            "auto.offset.reset": "earliest",
+        }
+    )
+    consumer.subscribe([DEFAULT_TOPIC])
+    print(f"Ingest worker listening on Kafka topic '{DEFAULT_TOPIC}'...")
+
+    try:
+        while True:
+            msg = consumer.poll(1.0)
+            if msg is None:
+                continue
+            if msg.error():
+                print(f"Kafka error: {msg.error()}")
+                continue
+
+            job_id = None
+            try:
+                payload = json.loads(msg.value().decode("utf-8"))
+                job_id = payload.get("id")
+                if job_id:
+                    _update_job_status(job_id, "STARTED")
+                if payload.get("function") != "worker.ingest.parse_adb_xml":
+                    raise ValueError(f"Unknown function {payload.get('function')}")
+                object_uri = (payload.get("args") or [None])[0]
+                if not object_uri:
+                    raise ValueError("Missing object_uri")
+                meta = payload.get("kwargs") or {}
+                result = parse_adb_xml(object_uri, meta)
+                if job_id:
+                    _update_job_status(job_id, "FINISHED", result=json.dumps(result))
+            except Exception as exc:
+                if job_id:
+                    _update_job_status(job_id, "FAILED", exc_info=str(exc))
+                print(f"Ingest job failed: {exc}")
+    finally:
+        consumer.close()
+
+
+if __name__ == "__main__":
+    _consume_loop()

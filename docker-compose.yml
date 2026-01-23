@@ -16,7 +16,7 @@ services:
       timeout: 5s
       retries: 15
 
-  # API (depends on db/redis/minio + optional bootstrap)
+  # API (depends on db/kafka/minio + optional bootstrap)
   api:
     build:
       context: .
@@ -24,7 +24,7 @@ services:
     env_file: ./.env
     environment:
       PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minio}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minio123}
@@ -34,7 +34,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      redis:
+      kafka:
         condition: service_started
       minio:
         condition: service_started
@@ -53,12 +53,13 @@ services:
     environment:
       <<: *default-env
       PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      KAFKA_GROUP_ID: ${KAFKA_TRAITS_GROUP_ID:-traits-worker}
       OLLAMA_URL: ${OLLAMA_URL:-http://local-llm:11434}
       LLM_MODEL: ${LLM_MODEL:-qwen2.5:7b-instruct-q4_K_M}
     depends_on:
       db:        { condition: service_healthy }
-      redis:     { condition: service_healthy }
+      kafka:     { condition: service_healthy }
       local-llm: { condition: service_healthy }
       bootstrap: { condition: service_completed_successfully }
 
@@ -69,14 +70,15 @@ services:
     env_file: ./.env
     environment:
       PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      KAFKA_GROUP_ID: ${KAFKA_INGEST_GROUP_ID:-worker-ingest}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minio}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minio123}
     depends_on:
       db:
         condition: service_healthy
-      redis:
+      kafka:
         condition: service_started
       minio:
         condition: service_started
@@ -104,6 +106,9 @@ services:
       PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
       PORT: 8002
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      KAFKA_TRAITS_TOPIC: ${KAFKA_TRAITS_TOPIC:-traits}
+      KAFKA_EMBEDDINGS_TOPIC: ${KAFKA_EMBEDDINGS_TOPIC:-embeddings}
     ports:
       - "8002:8002"
     depends_on:
@@ -147,17 +152,32 @@ services:
       timeout: 3s
       retries: 30
 
-  # Redis with readiness check
-  redis:
-    image: redis:7
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+  # Kafka (KRaft single-node)
+  kafka:
+    image: bitnami/kafka:3.7
     ports:
-      - "6379:6379"
+      - "9092:9092"
+    environment:
+      KAFKA_KRAFT_CLUSTER_ID: ${KAFKA_KRAFT_CLUSTER_ID:-Hq1cQxVdR7qS5N3Zk0A9Kg}
+      KAFKA_CFG_NODE_ID: 0
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_NUM_PARTITIONS: 1
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      ALLOW_PLAINTEXT_LISTENER: "yes"
     healthcheck:
-      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "ping"]
-      interval: 2s
-      timeout: 2s
-      retries: 30
+      test: ["CMD-SHELL", "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   # MinIO with readiness check
   minio:
@@ -206,7 +226,9 @@ services:
     env_file: ./.env
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      KAFKA_GROUP_ID: ${KAFKA_EMBEDDINGS_GROUP_ID:-embeddings-worker}
+      KAFKA_EMBEDDINGS_TOPIC: ${KAFKA_EMBEDDINGS_TOPIC:-embeddings}
       EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-BAAI/bge-large-en-v1.5}
     ports:
       - "8090:8090"
@@ -214,8 +236,8 @@ services:
       replicas: 1
     depends_on:
       db: { condition: service_healthy }
-      redis: { condition: service_healthy }
-    command: [ "rq", "worker", "-u", "${REDIS_URL}", "embeddings" ]
+      kafka: { condition: service_healthy }
+    command: [ "python", "-m", "jobs" ]
 
   # One-shot bootstrap job (buckets, seeds, migrations)
   bootstrap:

@@ -4,9 +4,9 @@ This script:
 - Finds people with QIDs but no biography text
 - Fetches and cleans Wikipedia wikitext
 - Updates the bio_text table
-- Enqueues downstream jobs:
-  - Traits scoring on the `traits` queue (Kotlin worker)
-  - Semantic embeddings on the `embeddings` queue (Python RQ worker)
+- Enqueues downstream jobs via Kafka:
+  - Traits scoring on the `traits` topic (Kotlin worker)
+  - Semantic embeddings on the `embeddings` topic (Python worker)
 """
 
 import json
@@ -18,8 +18,7 @@ import psycopg2
 import psycopg2.extras
 import requests
 import re
-from redis import Redis
-from rq import Queue
+from confluent_kafka import Producer
 
 def sitelink(qid, lang="en"):
     j = requests.get(f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json", timeout=20).json()
@@ -39,13 +38,31 @@ def clean_wikitext(wt):
     paras = [p.strip() for p in wt.split("\n") if len(p.strip())>120]
     return "\n\n".join(paras[:20])
 
-def _get_redis():
-    """Create a Redis client from REDIS_URL or default."""
-    url = os.getenv("REDIS_URL", "redis://redis:6379/0")
-    return Redis.from_url(url)
+def _get_producer():
+    bootstrap = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+    return Producer({"bootstrap.servers": bootstrap, "client.id": "fetch-bio"})
 
 
-def _enqueue_traits_job(redis: Redis, person_id):
+def _insert_job_status(cur, job: dict) -> None:
+    cur.execute(
+        """
+        INSERT INTO job_status
+            (id, function, status, args_json, kwargs_json, enqueued_at)
+        VALUES
+            (%s, %s, %s, %s, %s, %s)
+        """,
+        (
+            job["id"],
+            job["function"],
+            job["status"],
+            psycopg2.extras.Json(job.get("args", [])),
+            psycopg2.extras.Json(job.get("kwargs", {})),
+            job["enqueuedAt"],
+        ),
+    )
+
+
+def _enqueue_traits_job(producer: Producer, cur, person_id):
     """Enqueue a traits scoring job in the JSON format used by the Kotlin JobQueue."""
     job_id = str(uuid.uuid4())
     now_ms = int(time.time() * 1000)
@@ -63,12 +80,8 @@ def _enqueue_traits_job(redis: Redis, person_id):
         "excInfo": None,
     }
 
-    job_json = json.dumps(job)
-    # Match Kotlin JobQueue storage layout
-    pipe = redis.pipeline()
-    pipe.lpush("rq:queue:traits", job_json)
-    pipe.setex(f"rq:job:{job_id}", 86400, job_json)  # 1 day TTL, aligns with defaults
-    pipe.execute()
+    _insert_job_status(cur, job)
+    producer.produce(os.getenv("KAFKA_TRAITS_TOPIC", "traits"), key=job_id, value=json.dumps(job))
 
 
 def run(dsn, lang="en", limit=500):
@@ -76,9 +89,8 @@ def run(dsn, lang="en", limit=500):
     conn = psycopg2.connect(dsn)
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-    # Redis / RQ setup for downstream jobs
-    redis = _get_redis()
-    emb_queue = Queue("embeddings", connection=redis)
+    # Kafka producer for downstream jobs
+    producer = _get_producer()
 
     cur.execute(
         "SELECT person_id, qid FROM bio_text "
@@ -123,20 +135,35 @@ def run(dsn, lang="en", limit=500):
         enriched_ids.append(person_id)
 
         # Enqueue traits scoring for this person
-        _enqueue_traits_job(redis, person_id)
+        _enqueue_traits_job(producer, cur, person_id)
 
     conn.commit()
 
     # Batch enqueue embeddings job(s) for all enriched bios
     if enriched_ids:
-        emb_queue.enqueue(
-            "embeddings.jobs.embed_person_bios",
-            {
+        job_id = str(uuid.uuid4())
+        now_ms = int(time.time() * 1000)
+        job = {
+            "id": job_id,
+            "function": "embeddings.embed_person_bios",
+            "args": [],
+            "kwargs": {
                 "person_ids": enriched_ids,
                 "model": os.getenv("EMBEDDINGS_MODEL"),
                 "source": f"fetch_bio:{lang}",
             },
-            job_timeout=1800,
+            "status": "QUEUED",
+            "enqueuedAt": now_ms,
+            "startedAt": None,
+            "endedAt": None,
+            "result": None,
+            "excInfo": None,
+        }
+        _insert_job_status(cur, job)
+        producer.produce(
+            os.getenv("KAFKA_EMBEDDINGS_TOPIC", "embeddings"),
+            key=job_id,
+            value=json.dumps(job),
         )
 
     cur.execute(
@@ -154,6 +181,7 @@ def run(dsn, lang="en", limit=500):
         ),
     )
 
+    producer.flush()
     conn.commit()
     cur.close()
     conn.close()

@@ -19,7 +19,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 │  - Health checks                                             │
 └──────┬──────────────────────────────────────────────────────┘
        │
-       ├─→ Redis Queue (default)
+       ├─→ Kafka Topic (default)
        │         ↓
        │   ┌─────────────────────┐
        │   │ Worker-Ingest      │
@@ -36,10 +36,10 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 
 1. Ingest Worker
    ├─→ Parses XML → PostgreSQL (person_raw, birth, bio_text)
-   └─→ Enqueues → Redis (embeddings queue)
+   └─→ Enqueues → Kafka (embeddings topic)
 
 2. Embeddings Worker (Python)
-   ├─→ Reads from Redis (embeddings queue)
+   ├─→ Reads from Kafka (embeddings topic)
    ├─→ Generates semantic vectors (sentence-transformers)
    └─→ Writes → PostgreSQL (embeddings_* tables)
 
@@ -52,7 +52,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
    └─→ Updates → PostgreSQL (bio_text.text)
 
 5. Traits Worker (Kotlin)
-   ├─→ Reads from Redis (traits queue)
+   ├─→ Reads from Kafka (traits topic)
    ├─→ Calls → Ollama LLM (HTTP)
    └─→ Writes → PostgreSQL (nlp_vectors)
 
@@ -71,16 +71,16 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - **Serialization**: Kotlinx Serialization 1.6.2
 - **HTTP Client**: Ktor Client
 - **AWS SDK**: AWS SDK for Kotlin (S3)
-- **Redis**: Jedis 5.1.0
+- **Kafka**: Spring Kafka
 
 ### Python Services
-- **Framework**: FastAPI (fetch-bio), RQ (embeddings)
+- **Framework**: FastAPI (fetch-bio), Kafka consumer (embeddings)
 - **ML**: sentence-transformers (embeddings)
 - **Database**: psycopg2
 
 ### Infrastructure
 - **Database**: PostgreSQL 16 with pgvector extension
-- **Queue**: Redis 7
+- **Queue**: Kafka (KRaft, single-node)
 - **Object Storage**: MinIO
 - **LLM**: Ollama (local LLM runtime)
 - **Monitoring**: Grafana (optional)
@@ -103,7 +103,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - `POST /ingest/astrodatabank` - Upload XML file
 - `GET /jobs/{jobId}` - Get job status
 
-**Dependencies**: Database, Redis, MinIO
+**Dependencies**: Database, Kafka, MinIO
 
 ### 2. Worker-Ingest (`service/worker-ingest`)
 
@@ -120,11 +120,11 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - `IngestJob.kt` - Main processing logic
 - `IngestWorker.kt` - Queue worker loop
 
-**Dependencies**: Database, Redis, MinIO
+**Dependencies**: Database, Kafka, MinIO
 
 ### 3. Embeddings Worker (`service/worker_embeddings`)
 
-**Technology**: Python + RQ  
+**Technology**: Python + Kafka  
 **Queue**: `embeddings`  
 **Responsibilities**:
 - Generate semantic embeddings for biographies
@@ -133,7 +133,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 
 **Model**: BAAI/bge-large-en-v1.5 (configurable)
 
-**Dependencies**: Database, Redis
+**Dependencies**: Database, Kafka
 
 ### 4. Resolver Service (`service/resolver`)
 
@@ -180,7 +180,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 **Vectors Scored**:
 - sound, visual, oral, anal, urethral, skin, muscular, olfactory
 
-**Dependencies**: Database, Redis, Ollama
+**Dependencies**: Database, Kafka, Ollama
 
 ### 7. Astro Service (`service/astro`)
 
@@ -206,8 +206,8 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
    Client → API → MinIO
    
 2. Parse & Ingest
-   API → Redis Queue → Worker-Ingest → PostgreSQL
-   Worker-Ingest → Redis Queue (embeddings)
+   API → Kafka Topic → Worker-Ingest → PostgreSQL
+   Worker-Ingest → Kafka Topic (embeddings)
    
 3. Resolve QIDs
    Resolver → Wikidata API → PostgreSQL
@@ -217,7 +217,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
    Fetch-Bio → Wikipedia API → PostgreSQL
    
 5. Generate Embeddings
-   Redis Queue → Embeddings Worker → PostgreSQL
+   Kafka Topic → Embeddings Worker → PostgreSQL
    
 6. Score Traits
    [Manual trigger or polling] → Traits Worker → Ollama → PostgreSQL
@@ -244,10 +244,10 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - Resolver ↔ Fetch-Bio API
 - Traits Worker ↔ Ollama
 
-### Asynchronous (Redis Queue)
+### Asynchronous (Kafka Topics)
 - API → Worker-Ingest
 - Worker-Ingest → Embeddings Worker
-- [Future] → Traits Worker
+- Fetch-Bio → Traits Worker
 
 ### Database (PostgreSQL)
 - All services read/write to shared database
@@ -268,7 +268,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 
 ### Environment Variables
 - `PG_DSN` / `DATABASE_URL` - PostgreSQL connection
-- `REDIS_URL` - Redis connection
+- `KAFKA_BOOTSTRAP_SERVERS` - Kafka connection
 - `MINIO_*` - Object storage configuration
 - `OLLAMA_URL` - LLM service URL
 - `LLM_MODEL` - Model name for traits scoring
@@ -281,9 +281,9 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - **Database**: Single instance (can be replicated)
 
 ### Queue Management
-- Redis-based job queues
-- Multiple workers can consume from same queue
-- Job status tracking in Redis
+- Kafka-based job queues
+- Multiple workers can consume from same topic using consumer groups
+- Job status tracking in PostgreSQL (`job_status`)
 
 ### Resource Requirements
 - **CPU**: Moderate (LLM inference is CPU-bound)
@@ -304,7 +304,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - Health check endpoints on all services
 - Grafana for metrics (optional)
 - Provenance events for audit trail
-- Job status tracking in Redis
+- Job status tracking in PostgreSQL
 - Structured logging (SLF4J/Logback)
 
 ## Future Enhancements

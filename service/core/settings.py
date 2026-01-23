@@ -12,8 +12,8 @@ class Settings(BaseSettings):
     # Postgres
     PG_DSN: str = Field(..., description="postgresql://user:pass@host:5432/db")
 
-    # Redis (if/when you add a queue)
-    REDIS_URL: Optional[str] = None
+    # Kafka
+    KAFKA_BOOTSTRAP_SERVERS: Optional[str] = None
 
     # MinIO / S3 for raw blobs
     S3_ENDPOINT: Optional[str] = None

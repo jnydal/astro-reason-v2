@@ -4,5 +4,5 @@ psycopg[binary]
 # minio
 lxml
 requests
-rq
+confluent-kafka>=2.13
 

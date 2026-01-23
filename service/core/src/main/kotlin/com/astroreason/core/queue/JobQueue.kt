@@ -3,8 +3,20 @@ package com.astroreason.core.queue
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import redis.clients.jedis.Jedis
-import redis.clients.jedis.JedisPool
+import com.astroreason.core.DatabaseManager
+import com.astroreason.core.schema.JobStatusTable
+import kotlinx.serialization.decodeFromString
+import org.apache.kafka.clients.consumer.ConsumerConfig
+import org.apache.kafka.clients.consumer.KafkaConsumer
+import org.apache.kafka.clients.producer.ProducerConfig
+import org.apache.kafka.common.serialization.StringDeserializer
+import org.apache.kafka.common.serialization.StringSerializer
+import org.jetbrains.exposed.sql.*
+import org.jetbrains.exposed.sql.transactions.transaction
+import org.springframework.kafka.core.DefaultKafkaProducerFactory
+import org.springframework.kafka.core.KafkaTemplate
+import java.time.Duration
+import java.time.Instant
 import java.util.*
 
 @Serializable
@@ -28,8 +40,39 @@ enum class JobStatus {
     FAILED
 }
 
-class JobQueue(private val jedisPool: JedisPool, private val queueName: String = "default") {
-    
+class JobQueue(
+    private val bootstrapServers: String,
+    private val queueName: String = "default",
+    private val groupId: String? = null,
+    private val clientId: String = "astro-reason"
+) {
+    private val json = Json { encodeDefaults = true }
+    private val kafkaTemplate: KafkaTemplate<String, String>
+    private val consumer: KafkaConsumer<String, String>?
+
+    init {
+        val producerProps = mapOf(
+            ProducerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
+            ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG to StringSerializer::class.java,
+            ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG to StringSerializer::class.java,
+            ProducerConfig.CLIENT_ID_CONFIG to clientId
+        )
+        val producerFactory = DefaultKafkaProducerFactory<String, String>(producerProps)
+        kafkaTemplate = KafkaTemplate(producerFactory)
+
+        consumer = groupId?.let { gid ->
+            val props = Properties()
+            props[ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG] = bootstrapServers
+            props[ConsumerConfig.GROUP_ID_CONFIG] = gid
+            props[ConsumerConfig.AUTO_OFFSET_RESET_CONFIG] = "earliest"
+            props[ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
+            props[ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
+            KafkaConsumer<String, String>(props).apply {
+                subscribe(listOf(queueName))
+            }
+        }
+    }
+
     fun enqueue(
         function: String,
         vararg args: String,
@@ -43,58 +86,92 @@ class JobQueue(private val jedisPool: JedisPool, private val queueName: String =
             args = args.toList(),
             kwargs = kwargs
         )
-        
-        jedisPool.resource.use { jedis ->
-            val jobJson = Json.encodeToString(job)
-            jedis.lpush("rq:queue:$queueName", jobJson)
-            jedis.setex("rq:job:${job.id}", resultTtl.toLong(), jobJson)
-        }
-        
+
+        persistJob(job)
+        kafkaTemplate.send(queueName, job.id, json.encodeToString(job))
+
         return job
     }
-    
+
     fun fetch(jobId: String): Job? {
-        return jedisPool.resource.use { jedis ->
-            val jobJson = jedis.get("rq:job:$jobId")
-            if (jobJson != null) {
-                Json.decodeFromString<Job>(jobJson)
-            } else {
-                null
-            }
+        return transaction(DatabaseManager.getDatabase()) {
+            JobStatusTable.select { JobStatusTable.id eq UUID.fromString(jobId) }
+                .singleOrNull()
+                ?.let { row ->
+                    val args = runCatching {
+                        json.decodeFromString<List<String>>(row[JobStatusTable.argsJson])
+                    }.getOrElse { emptyList() }
+                    val kwargs = runCatching {
+                        json.decodeFromString<Map<String, String>>(row[JobStatusTable.kwargsJson])
+                    }.getOrElse { emptyMap() }
+                    Job(
+                        id = row[JobStatusTable.id].value.toString(),
+                        function = row[JobStatusTable.function],
+                        args = args,
+                        kwargs = kwargs,
+                        status = JobStatus.valueOf(row[JobStatusTable.status]),
+                        enqueuedAt = row[JobStatusTable.enqueuedAt],
+                        startedAt = row[JobStatusTable.startedAt],
+                        endedAt = row[JobStatusTable.endedAt],
+                        result = row[JobStatusTable.result],
+                        excInfo = row[JobStatusTable.excInfo]
+                    )
+                }
         }
     }
-    
+
     fun dequeue(): Job? {
-        return jedisPool.resource.use { jedis ->
-            val result = jedis.brpop(10, "rq:queue:$queueName")
-            if (result != null && result.size >= 2) {
-                val jobJson = result[1]
-                Json.decodeFromString<Job>(jobJson)
-            } else {
-                null
-            }
+        val kafkaConsumer = consumer ?: return null
+        val records = kafkaConsumer.poll(Duration.ofSeconds(5))
+        if (records.isEmpty) {
+            return null
         }
+
+        val record = records.first()
+        return json.decodeFromString(record.value())
     }
-    
+
     fun updateStatus(jobId: String, status: JobStatus, result: String? = null, excInfo: String? = null) {
         val job = fetch(jobId) ?: return
-        
-        val updated = job.copy(
-            status = status,
-            startedAt = if (status == JobStatus.STARTED) System.currentTimeMillis() else job.startedAt,
-            endedAt = if (status in listOf(JobStatus.FINISHED, JobStatus.FAILED)) System.currentTimeMillis() else job.endedAt,
-            result = result,
-            excInfo = excInfo
-        )
-        
-        jedisPool.resource.use { jedis ->
-            val jobJson = Json.encodeToString(updated)
-            jedis.set("rq:job:$jobId", jobJson)
+        val now = System.currentTimeMillis()
+        val startedAt = if (status == JobStatus.STARTED) now else job.startedAt
+        val endedAt = if (status in listOf(JobStatus.FINISHED, JobStatus.FAILED)) now else job.endedAt
+
+        transaction(DatabaseManager.getDatabase()) {
+            JobStatusTable.update({ JobStatusTable.id eq UUID.fromString(jobId) }) {
+                it[JobStatusTable.status] = status.name
+                it[JobStatusTable.startedAt] = startedAt
+                it[JobStatusTable.endedAt] = endedAt
+                it[JobStatusTable.result] = result
+                it[JobStatusTable.excInfo] = excInfo
+                it[JobStatusTable.updatedAt] = Instant.now()
+            }
+        }
+    }
+
+    private fun persistJob(job: Job) {
+        transaction(DatabaseManager.getDatabase()) {
+            JobStatusTable.insert {
+                it[id] = UUID.fromString(job.id)
+                it[function] = job.function
+                it[status] = job.status.name
+                it[argsJson] = json.encodeToString(job.args)
+                it[kwargsJson] = json.encodeToString(job.kwargs)
+                it[enqueuedAt] = job.enqueuedAt
+                it[startedAt] = job.startedAt
+                it[endedAt] = job.endedAt
+                it[result] = job.result
+                it[excInfo] = job.excInfo
+            }
         }
     }
 }
 
-fun createJobQueue(redisUrl: String, queueName: String = "default"): JobQueue {
-    val pool = JedisPool(redisUrl)
-    return JobQueue(pool, queueName)
+fun createJobQueue(
+    bootstrapServers: String,
+    queueName: String = "default",
+    groupId: String? = null,
+    clientId: String = "astro-reason"
+): JobQueue {
+    return JobQueue(bootstrapServers, queueName, groupId, clientId)
 }

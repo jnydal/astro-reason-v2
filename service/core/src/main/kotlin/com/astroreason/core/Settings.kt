@@ -13,8 +13,8 @@ data class Settings(
         ?: System.getenv("DATABASE_URL")
         ?: throw IllegalArgumentException("PG_DSN or DATABASE_URL must be set"),
     
-    // Redis
-    val redisUrl: String? = System.getenv("REDIS_URL"),
+    // Kafka
+    val kafkaBootstrapServers: String = System.getenv("KAFKA_BOOTSTRAP_SERVERS") ?: "kafka:9092",
     
     // MinIO / S3
     val s3Endpoint: String? = System.getenv("MINIO_ENDPOINT") ?: System.getenv("S3_ENDPOINT"),

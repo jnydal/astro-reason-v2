@@ -5,7 +5,8 @@ services:
       dockerfile: service/resolver/Dockerfile
     environment:
       PG_DSN: postgresql://postgres:postgres@db:5432/astro_reason
-    depends_on: [db, redis]
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on: [db, kafka]
 
   ingest:
     build:
@@ -14,7 +15,8 @@ services:
     environment:
       PG_DSN: postgresql://postgres:postgres@db:5432/astro_reason
       MINIO_ENDPOINT: http://minio:9000
-    depends_on: [db, minio, redis]
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on: [db, minio, kafka]
 
   astro:
     build:
@@ -23,4 +25,5 @@ services:
     environment:
       PG_DSN: postgresql://postgres:postgres@db:5432/astro_reason
       SE_EPHE_PATH: /opt/ephe
-    depends_on: [db, redis]
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on: [db, kafka]

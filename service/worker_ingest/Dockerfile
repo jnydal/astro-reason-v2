@@ -7,11 +7,11 @@ COPY requirements/base.txt requirements/constraints.txt ./requirements/
 RUN pip install --upgrade pip && \
     pip install -r requirements/base.txt -c requirements/constraints.txt
 
-# copy and install service-specific reqs (correct path)
-COPY service/astro/requirements/worker_embeddings_requirements.txt ./requirements/
-RUN pip install -r ./requirements/worker_embeddings_requirements.txt -c requirements/constraints.txt
+# copy and install service-specific reqs
+COPY service/worker_ingest/requirements/worker_ingest_requirements.txt ./requirements/
+RUN pip install -r ./requirements/worker_ingest_requirements.txt -c requirements/constraints.txt
 
 # now copy source
 COPY . .
-ENV PYTHONPATH=/app/src:/app
-CMD ["rq", "worker", "-u", "redis://redis:6379/0", "ingest"]
+ENV PYTHONPATH=/app/service/worker_ingest/src:/app
+CMD ["python", "-m", "jobs"]

@@ -1,4 +1,5 @@
 # embeddings/jobs.py
+import json
 import os
 import time
 from datetime import datetime
@@ -8,14 +9,48 @@ import psycopg2, psycopg2.extras
 from psycopg2 import sql
 from pgvector.psycopg2 import register_vector
 from sentence_transformers import SentenceTransformer
+from confluent_kafka import Consumer
 
 from app.core.provenance import log_event  # optional helper
 
 EMBED_MODEL = os.getenv("EMBEDDINGS_MODEL", "BAAI/bge-large-en-v1.5")
 DSN = os.getenv("DATABASE_URL", "").replace("postgresql+psycopg://", "postgresql://")
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+KAFKA_GROUP_ID = os.getenv("KAFKA_GROUP_ID", "embeddings-worker")
+KAFKA_TOPIC = os.getenv("KAFKA_EMBEDDINGS_TOPIC", "embeddings")
+
+def _update_job_status(job_id: str, status: str, result: str | None = None, exc_info: str | None = None) -> None:
+    if not DSN:
+        return
+    conn = psycopg2.connect(DSN)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE job_status
+           SET status = %s,
+               started_at = COALESCE(started_at, %s),
+               ended_at = CASE WHEN %s IN ('FINISHED', 'FAILED') THEN %s ELSE ended_at END,
+               result = %s,
+               exc_info = %s,
+               updated_at = NOW()
+         WHERE id = %s
+        """,
+        (
+            status,
+            int(time.time() * 1000),
+            status,
+            int(time.time() * 1000),
+            result,
+            exc_info,
+            job_id,
+        ),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def embed_person_bios(payload: dict):
-    """RQ job: Embed bios for given person_ids and upsert into embeddings table."""
+    """Kafka job: Embed bios for given person_ids and upsert into embeddings table."""
     started = time.monotonic()
     person_ids = payload.get("person_ids") or []
     model_name = payload.get("model", EMBED_MODEL)
@@ -123,3 +158,46 @@ def embed_person_bios(payload: dict):
 
     print(f"✅ Embedded {len(todo)} bios.")
     return {"status": "ok", "count": len(todo)}
+
+
+def _consume_loop():
+    consumer = Consumer(
+        {
+            "bootstrap.servers": KAFKA_BOOTSTRAP,
+            "group.id": KAFKA_GROUP_ID,
+            "auto.offset.reset": "earliest",
+        }
+    )
+    consumer.subscribe([KAFKA_TOPIC])
+
+    print(f"Embeddings worker listening on Kafka topic '{KAFKA_TOPIC}'...")
+
+    try:
+        while True:
+            msg = consumer.poll(1.0)
+            if msg is None:
+                continue
+            if msg.error():
+                print(f"Kafka error: {msg.error()}")
+                continue
+
+            job_id = None
+            try:
+                payload = json.loads(msg.value().decode("utf-8"))
+                job_id = payload.get("id")
+                kwargs = payload.get("kwargs") or {}
+                if job_id:
+                    _update_job_status(job_id, "STARTED")
+                result = embed_person_bios(kwargs)
+                if job_id:
+                    _update_job_status(job_id, "FINISHED", result=json.dumps(result))
+            except Exception as exc:
+                if job_id:
+                    _update_job_status(job_id, "FAILED", exc_info=str(exc))
+                print(f"Embeddings job failed: {exc}")
+    finally:
+        consumer.close()
+
+
+if __name__ == "__main__":
+    _consume_loop()

@@ -21,5 +21,5 @@ COPY . .
 # make src importable -> "jobs.embed_person_bios" works
 ENV PYTHONPATH=/app/src:/app
 
-# RQ worker for the "embeddings" queue
-CMD ["rq", "worker", "-u", "redis://redis:6379/0", "embeddings"]
+# Kafka consumer for the "embeddings" topic
+CMD ["python", "-m", "jobs"]

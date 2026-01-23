@@ -49,7 +49,7 @@ watch -n 2 "curl -s http://localhost:8000/jobs/$JOB_ID | jq .status"
 
 **What Happens**:
 1. API stores XML in MinIO
-2. Enqueues job in Redis (`default` queue)
+2. Enqueues job in Kafka (`default` topic)
 3. Worker-ingest processes XML
 4. Inserts into `person_raw`, `birth`, `bio_text`
 5. Enqueues embedding jobs
@@ -70,7 +70,7 @@ docker compose logs -f resolver
 ### Step 3: Generate Embeddings
 
 Embeddings worker processes jobs automatically:
-- Reads from `embeddings` queue
+- Reads from `embeddings` topic
 - Generates semantic vectors
 - Stores in `embeddings_*` tables
 
@@ -85,8 +85,11 @@ docker compose logs -f embeddings
 
 **Manual Trigger** (optional):
 ```bash
-# Enqueue a traits job directly via Redis
-redis-cli LPUSH "rq:queue:traits" '{"function":"traits.score_person","args":["person-uuid"]}'
+# Enqueue a traits job directly via Kafka
+docker compose exec kafka /opt/bitnami/kafka/bin/kafka-console-producer.sh \
+  --bootstrap-server localhost:9092 --topic traits <<'EOF'
+{"id":"<job-uuid>","function":"traits.score_person","args":["person-uuid"],"kwargs":{},"status":"QUEUED","enqueuedAt":0,"startedAt":null,"endedAt":null,"result":null,"excInfo":null}
+EOF
 ```
 
 ### Step 5: Compute Astro Features
@@ -138,10 +141,13 @@ LIMIT 10;
 ### Check Job Queue Status
 
 ```bash
-# Redis queue lengths
-redis-cli LLEN "rq:queue:default"
-redis-cli LLEN "rq:queue:embeddings"
-redis-cli LLEN "rq:queue:traits"
+# Kafka topic offsets and consumer lag
+docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe --topic default
+docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe --topic embeddings
+docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe --topic traits
 ```
 
 ## Troubleshooting
@@ -162,11 +168,9 @@ docker compose exec db pg_isready -U postgres
 ### Jobs Not Processing
 
 ```bash
-# Check Redis connection
-docker compose exec redis redis-cli ping
-
-# Check queue status
-docker compose exec redis redis-cli LLEN "rq:queue:default"
+# Check Kafka connection
+docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --list
 
 # Check worker logs
 docker compose logs -f worker-ingest
@@ -209,7 +213,7 @@ docker compose exec local-llm ollama pull qwen2.5:7b-instruct-q4_K_M
 ### Local Development
 
 ```bash
-# Run API locally (requires DB/Redis running)
+# Run API locally (requires DB/Kafka running)
 cd service/api
 ./gradlew run
 
@@ -301,8 +305,8 @@ ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
 ### Queue Monitoring
 
 ```bash
-# Watch queue lengths
-watch -n 1 'redis-cli LLEN "rq:queue:default"; redis-cli LLEN "rq:queue:embeddings"'
+# Watch topic status (sample)
+watch -n 5 'docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic default'
 ```
 
 ## Common Tasks
@@ -316,7 +320,7 @@ TRUNCATE person_raw CASCADE;
 
 ### Reprocess Failed Jobs
 
-Jobs are stored in Redis with TTL. Check Redis for failed job IDs and re-enqueue if needed.
+Jobs are stored in PostgreSQL (`job_status`). Check failed job IDs and re-enqueue to Kafka if needed.
 
 ### Manual Trigger Services
 

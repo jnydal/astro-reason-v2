@@ -171,3 +171,16 @@ object Embeddings1536 : Table("embeddings_1536") {
 
     override val primaryKey = PrimaryKey(personId, modelName)
 }
+
+object JobStatusTable : UUIDTable("job_status", columnName = "id") {
+    val function = text("function")
+    val status = text("status")
+    val argsJson = jsonb("args_json")
+    val kwargsJson = jsonb("kwargs_json")
+    val enqueuedAt = long("enqueued_at")
+    val startedAt = long("started_at").nullable()
+    val endedAt = long("ended_at").nullable()
+    val result = text("result").nullable()
+    val excInfo = text("exc_info").nullable()
+    val updatedAt = timestamp("updated_at").defaultExpression(CurrentTimestamp())
+}

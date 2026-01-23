@@ -13,8 +13,8 @@ dependencies {
     implementation("com.zaxxer:HikariCP:5.1.0")
     implementation("org.postgresql:postgresql:42.7.1")
 
-    // Redis
-    implementation("redis.clients:jedis:5.1.0")
+    // Kafka
+    implementation("org.springframework.kafka:spring-kafka:3.3.5")
 
     // Logging
     implementation("org.slf4j:slf4j-api:2.0.9")

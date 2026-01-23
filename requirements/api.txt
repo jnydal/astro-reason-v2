@@ -2,6 +2,6 @@
 fastapi
 uvicorn
 pydantic
-redis
+confluent-kafka>=2.13
 psycopg[binary]
 sqlalchemy
