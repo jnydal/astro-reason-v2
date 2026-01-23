@@ -44,9 +44,9 @@ data class ClusterRow(
 
 data class PersonPoint(
     val personId: UUID,
-    val point: DoubleArray
+    val vector: DoubleArray
 ) : Clusterable {
-    override fun getPoint(): DoubleArray = point
+    override fun getPoint(): DoubleArray = vector
 }
 
 fun loadNlpAstroRows(limit: Int? = null): List<StatsRow> {
