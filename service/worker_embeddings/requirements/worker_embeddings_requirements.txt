@@ -1,5 +1,5 @@
 # requirements/embeddings.txt
-psycopg[binary]
+psycopg2-binary
 pgvector
 numpy
 sentence-transformers
