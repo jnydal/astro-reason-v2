@@ -7,6 +7,7 @@ import com.astroreason.core.queue.createJobQueue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.util.concurrent.atomic.AtomicBoolean
 
 fun main() {
     Config.initialize()
@@ -20,11 +21,19 @@ fun main() {
         clientId = "worker-ingest"
     )
     
+    val running = AtomicBoolean(true)
+    Runtime.getRuntime().addShutdownHook(Thread {
+        running.set(false)
+        println("Shutdown signal received, stopping worker...")
+    })
+
     println("Worker started, listening for jobs...")
+    var idleBackoffMs = 100L
     
-    while (true) {
+    while (running.get()) {
         val envelope = jobQueue.dequeue()
         if (envelope != null) {
+            idleBackoffMs = 100L
             val job = envelope.job
             try {
                 val startedAt = System.nanoTime()
@@ -67,6 +76,9 @@ fun main() {
             } finally {
                 jobQueue.ack(envelope)
             }
+        } else {
+            Thread.sleep(idleBackoffMs)
+            idleBackoffMs = (idleBackoffMs * 2).coerceAtMost(2_000L)
         }
     }
 }
