@@ -1,14 +1,14 @@
 import datetime as dt
 import types
 
-from app.workers.astro_features import compute_features_for_person, PLANETS
+from service.astro.app.astro_features import compute_features_for_person, PLANETS
 
 def test_compute_features_minimal(monkeypatch):
     # Fake longitudes (spread them around the zodiac deterministically)
     fake_longs = {p: (i * 33.3) % 360 for i, p in enumerate(PLANETS)}
 
     # Patch the skyfield_longitudes function used by the 'skyfield' backend
-    import app.workers.astro_features as af
+    import service.astro.app.astro_features as af
     def _fake_sf_longitudes(_dt_utc, _lat, _lon):
         return fake_longs
     monkeypatch.setattr(af, "skyfield_longitudes", _fake_sf_longitudes)
