@@ -1,7 +1,16 @@
 import datetime as dt
 import types
 
-from service.astro.app.astro_features import compute_features_for_person, PLANETS
+from service.astro.app.astro_features import (
+    PLANETS,
+    ang_distance,
+    compute_aspects,
+    compute_features_for_person,
+    elem_modality_tallies,
+    sign_from_longitude,
+    to_julday_utc,
+    wrap360,
+)
 
 def test_compute_features_minimal(monkeypatch):
     # Fake longitudes (spread them around the zodiac deterministically)
@@ -57,3 +66,44 @@ def test_compute_features_minimal(monkeypatch):
     fv = out["feature_vec"]
     for p in PLANETS:
         assert f"lon_{p}_sin" in fv and f"lon_{p}_cos" in fv
+
+
+def test_wrap360_and_ang_distance():
+    assert wrap360(370.0) == 10.0
+    assert wrap360(-10.0) == 350.0
+    assert ang_distance(10.0, 350.0) == 20.0
+
+
+def test_sign_from_longitude_boundaries():
+    sign, deg = sign_from_longitude(0.0)
+    assert sign == "aries"
+    assert deg == 0.0
+
+    sign, deg = sign_from_longitude(29.9)
+    assert sign == "aries"
+    assert 29.0 < deg < 30.0
+
+    sign, deg = sign_from_longitude(30.0)
+    assert sign == "taurus"
+    assert deg == 0.0
+
+
+def test_elem_modality_tallies_all_aries():
+    longs = {p: 0.0 for p in PLANETS}
+    elems, mods = elem_modality_tallies(longs)
+    assert elems == {"fire": 1.0, "earth": 0.0, "air": 0.0, "water": 0.0}
+    assert mods == {"cardinal": 1.0, "fixed": 0.0, "mutable": 0.0}
+
+
+def test_compute_aspects_simple_conjunction():
+    longs = {"sun": 0.0, "moon": 5.0}
+    aspects = compute_aspects(longs)
+    assert aspects
+    conj = next(a for a in aspects if a["aspect"] == "conjunction")
+    assert {conj["a"], conj["b"]} == {"sun", "moon"}
+
+
+def test_to_julday_utc_unknown_time():
+    jd, unknown = to_julday_utc(dt.date(1984, 6, 12), None, 0)
+    assert isinstance(jd, float)
+    assert unknown is True
