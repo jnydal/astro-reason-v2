@@ -15,6 +15,8 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.io.File
+import java.time.LocalDate
+import java.time.LocalTime
 import java.util.*
 import kotlin.io.path.createTempFile
 import kotlin.io.path.deleteIfExists
@@ -28,6 +30,7 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
     val settings = Config.settings
     val s3Client = S3Client {
         settings.s3Endpoint?.let { endpointUrl = Url.parse(it) }
+        forcePathStyle = true
         settings.s3AccessKey?.let {
             credentialsProvider = StaticCredentialsProvider(
                 Credentials(it, settings.s3SecretKey ?: "")
@@ -140,8 +143,8 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
                 // Birth data
                 birthBatch.add(personId to BirthData(
                     personId = personId,
-                    date = rec.date?.let { java.time.LocalDate.parse(it) },
-                    time = rec.time?.let { java.time.LocalTime.parse(it) },
+                    date = parseLocalDate(rec.date),
+                    time = parseLocalTime(rec.time),
                     tzOffsetMinutes = tzToMinutes(rec.tz),
                     placeName = rec.place,
                     lat = rec.lat,
@@ -194,6 +197,22 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
     } finally {
         tempFile.delete()
     }
+}
+
+private fun parseLocalDate(raw: String?): LocalDate? {
+    if (raw.isNullOrBlank()) return null
+    val match = Regex("""\d{4}[-/]\d{2}[-/]\d{2}""").find(raw.trim())?.value ?: return null
+    val normalized = match.replace("/", "-")
+    return runCatching { LocalDate.parse(normalized) }.getOrNull()
+}
+
+private fun parseLocalTime(raw: String?): LocalTime? {
+    if (raw.isNullOrBlank()) return null
+    val trimmed = raw.trim()
+    val direct = runCatching { LocalTime.parse(trimmed) }.getOrNull()
+    if (direct != null) return direct
+    val match = Regex("""\d{1,2}:\d{2}(:\d{2})?""").find(trimmed)?.value ?: return null
+    return runCatching { LocalTime.parse(match) }.getOrNull()
 }
 
 data class BirthData(

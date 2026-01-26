@@ -1,0 +1,4 @@
+ALTER TABLE birth
+  ADD COLUMN IF NOT EXISTS tz_offset_minutes INT,
+  ADD COLUMN IF NOT EXISTS place_name TEXT,
+  ADD COLUMN IF NOT EXISTS data_quality TEXT;

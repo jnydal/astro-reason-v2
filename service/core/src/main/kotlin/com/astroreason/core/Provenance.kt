@@ -1,5 +1,6 @@
 package com.astroreason.core
 
+import com.astroreason.core.schema.jsonb
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.javatime.timestamp
@@ -12,7 +13,7 @@ object ProvenanceEvents : Table("provenance_event") {
     val id = long("id").autoIncrement()
     val personId = uuid("person_id").nullable()
     val stage = text("stage")
-    val detail = text("detail") // JSONB stored as text
+    val detail = jsonb("detail")
     val createdAt = timestamp("created_at").defaultExpression(CurrentTimestamp())
 
     override val primaryKey = PrimaryKey(id)
