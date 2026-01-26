@@ -14,6 +14,7 @@ import io.ktor.client.plugins.timeout
 import io.ktor.client.request.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.decodeFromString
@@ -23,6 +24,7 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import java.time.format.DateTimeFormatter
 import java.util.*
+import kotlin.random.Random
 
 @Serializable
 data class WikidataSearchResult(
@@ -67,6 +69,10 @@ data class WikidataDataValue(
 )
 
 class QidResolver {
+    private val minIntervalMs = ((System.getenv("WIKIDATA_MIN_INTERVAL_SEC") ?: "1.0").toDouble() * 1000).toLong()
+    private val jitterMs = ((System.getenv("WIKIDATA_JITTER_SEC") ?: "0.2").toDouble() * 1000).toLong()
+    private var nextRequestTimeMs = 0L
+
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
             json(Json {
@@ -76,8 +82,35 @@ class QidResolver {
         }
         install(HttpTimeout)
     }
+
+    private suspend fun waitForRateLimit() {
+        val now = System.currentTimeMillis()
+        if (now < nextRequestTimeMs) {
+            delay(nextRequestTimeMs - now)
+        }
+        if (jitterMs > 0) {
+            delay(Random.nextLong(0, jitterMs + 1))
+        }
+        nextRequestTimeMs = System.currentTimeMillis() + minIntervalMs
+    }
+
+    private fun extractWikidataDate(timeValue: String): String? {
+        val match = Regex("""[+-]\d{4}-\d{2}-\d{2}""").find(timeValue)
+        return match?.value?.removePrefix("+")
+    }
+
+    private fun normalizeName(name: String): String {
+        val cleaned = name.trim()
+        val commaIndex = cleaned.indexOf(',')
+        if (commaIndex < 0) return cleaned
+        val last = cleaned.substring(0, commaIndex).trim()
+        val first = cleaned.substring(commaIndex + 1).trim()
+        if (first.isBlank()) return cleaned
+        return "$first $last"
+    }
     
     suspend fun searchQid(name: String): List<WikidataItem> {
+        waitForRateLimit()
         val response = client.get("https://www.wikidata.org/w/api.php") {
             parameter("action", "wbsearchentities")
             parameter("language", "en")
@@ -96,6 +129,7 @@ class QidResolver {
         if (dobIso.isNullOrBlank()) return false
         
         return try {
+            waitForRateLimit()
             val response = client.get("https://www.wikidata.org/wiki/Special:EntityData/$qid.json") {
                 timeout {
                     requestTimeoutMillis = 20000
@@ -106,7 +140,7 @@ class QidResolver {
             val birthDateClaim = entity.claims["P569"]?.firstOrNull() ?: return false
             val timeValue = birthDateClaim.mainsnak?.datavalue?.value?.get("time") ?: return false
             
-            dobIso in timeValue
+            dobIso == extractWikidataDate(timeValue)
         } catch (e: Exception) {
             false
         }
@@ -138,7 +172,10 @@ class QidResolver {
         val resolved = mutableListOf<Pair<UUID, String>>()
 
         for (person in pending) {
-            val candidates = searchQid(person.fullName)
+            var candidates = searchQid(normalizeName(person.fullName))
+            if (candidates.isEmpty()) {
+                candidates = searchQid(person.fullName)
+            }
             var qid: String? = null
 
             // Try to match by date
@@ -162,9 +199,12 @@ class QidResolver {
         if (resolved.isNotEmpty()) {
             transaction(DatabaseManager.getDatabase()) {
                 for ((personId, qid) in resolved) {
-                    BioText.insert {
+                    BioText.insertIgnore {
                         it[BioText.personId] = personId
                         it[BioText.revId] = 0L
+                        it[BioText.qid] = qid
+                    }
+                    BioText.update({ (BioText.personId eq personId) and (BioText.revId eq 0L) }) {
                         it[BioText.qid] = qid
                     }
                 }
@@ -236,16 +276,23 @@ fun main() {
     Config.initialize()
     
     val resolver = QidResolver()
+    val resolveLimit = System.getenv("RESOLVE_LIMIT")?.toIntOrNull() ?: 500
+    val resolveOnce = System.getenv("RESOLVE_ONCE")?.lowercase() == "true"
     
     println("Resolver started...")
     
     while (true) {
         try {
             kotlinx.coroutines.runBlocking {
-                resolver.resolveQids(500)
+                resolver.resolveQids(resolveLimit)
                 
                 // After resolving QIDs, fetch Wikipedia biographies via HTTP API
-                resolver.triggerFetchBio("en", 500)
+                resolver.triggerFetchBio("en", resolveLimit)
+            }
+
+            if (resolveOnce) {
+                println("Resolver finished single batch.")
+                break
             }
             
             Thread.sleep(60000) // Wait 1 minute between batches
