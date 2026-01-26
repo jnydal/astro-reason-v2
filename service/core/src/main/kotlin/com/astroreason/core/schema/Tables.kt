@@ -7,10 +7,44 @@ import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.javatime.date
 import org.jetbrains.exposed.sql.javatime.time
 import org.jetbrains.exposed.sql.javatime.timestamp
+import org.jetbrains.exposed.sql.statements.api.PreparedStatementApi
+import org.postgresql.util.PGobject
 import java.util.*
 
-// Helper for JSONB columns - stored as text in Exposed
-fun Table.jsonb(name: String): Column<String> = text(name)
+class JsonbColumnType : ColumnType() {
+    override fun sqlType(): String = "JSONB"
+
+    override fun valueFromDB(value: Any): Any = when (value) {
+        is PGobject -> value.value ?: "null"
+        else -> value.toString()
+    }
+
+    override fun notNullValueToDB(value: Any): Any {
+        return valueToJsonb(value)
+    }
+
+    override fun setParameter(stmt: PreparedStatementApi, index: Int, value: Any?) {
+        if (value == null) {
+            stmt.setNull(index, this)
+            return
+        }
+
+        stmt[index] = valueToJsonb(value)
+    }
+
+    private fun valueToJsonb(value: Any): PGobject {
+        return when (value) {
+            is PGobject -> value
+            else -> PGobject().apply {
+                type = "jsonb"
+                this.value = value.toString()
+            }
+        }
+    }
+}
+
+// Helper for JSONB columns
+fun Table.jsonb(name: String): Column<String> = registerColumn(name, JsonbColumnType())
 
 object PersonRaw : UUIDTable("person_raw", columnName = "id") {
     val xmlId = text("xml_id").nullable()
