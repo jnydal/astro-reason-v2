@@ -5,8 +5,10 @@ import com.astroreason.core.DatabaseManager
 import com.astroreason.core.schema.*
 import io.ktor.client.*
 import io.ktor.client.call.*
+import io.ktor.client.statement.bodyAsText
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.expectSuccess
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.*
@@ -14,6 +16,7 @@ import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.decodeFromString
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.io.File
@@ -194,13 +197,31 @@ class QidResolver {
                 timeout {
                     requestTimeoutMillis = 300000 // 5 minutes
                 }
-            }.body<FetchBioResponse>()
+                expectSuccess = false
+            }
             
-            if (response.status == "ok") {
-                println("✅ Fetched ${response.written} Wikipedia bios: ${response.message}")
+            if (!response.status.isSuccess()) {
+                val bodyText = runCatching { response.bodyAsText() }.getOrNull()
+                println("❌ fetch_bio API failed: ${response.status} ${bodyText ?: ""}".trim())
+                return false
+            }
+            
+            val bodyText = response.bodyAsText()
+            val parsed = runCatching {
+                Json {
+                    ignoreUnknownKeys = true
+                    isLenient = true
+                }.decodeFromString<FetchBioResponse>(bodyText)
+            }.getOrElse { err ->
+                println("❌ fetch_bio API response parse error: ${err.message}")
+                return false
+            }
+            
+            if (parsed.status == "ok") {
+                println("✅ Fetched ${parsed.written} Wikipedia bios: ${parsed.message}")
                 true
             } else {
-                println("⚠️ fetch_bio API returned status: ${response.status}")
+                println("⚠️ fetch_bio API returned status: ${parsed.status}")
                 false
             }
         } catch (e: Exception) {

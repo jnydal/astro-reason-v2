@@ -1,3 +1,1 @@
 High: hardcoded default credentials — docker-compose.yml includes defaults like postgres, minio123, admin. Fine for local dev, risky if reused in production.
-High: worker shutdown & backoff — infinite loops without graceful shutdown/backoff in service/worker-ingest/src/main/kotlin/com/astroreason/ingest/IngestWorker.kt and service/traits/src/main/kotlin/com/astroreason/traits/TraitWorker.kt.
-High: low test coverage — only a couple of tests (test/test_astro_features.py, AstroFeaturesTest.kt), missing API/worker/integration tests.

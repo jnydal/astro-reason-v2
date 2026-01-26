@@ -14,6 +14,7 @@ import os
 import time
 import uuid
 import random
+import hashlib
 
 import psycopg2
 import psycopg2.extras
@@ -66,7 +67,10 @@ def fetch_latest_wikitext(session: requests.Session, limiter: RateLimiter, lang,
     )
     r.raise_for_status()
     j = r.json()
-    return j.get("latest", {}).get("id"), j.get("source")
+    page_id = j.get("id")
+    latest = j.get("latest", {}) or {}
+    rev_id = latest.get("id")
+    return page_id, rev_id, j.get("source")
 
 def clean_wikitext(wt):
     wt = re.sub(r"==.*?==", "\n", wt)
@@ -122,9 +126,18 @@ def _enqueue_traits_job(producer: Producer, cur, person_id):
     producer.produce(os.getenv("KAFKA_TRAITS_TOPIC", "traits"), key=job_id, value=json.dumps(job))
 
 
+def _normalize_dsn(dsn: str) -> str:
+    # psycopg2 expects postgresql://, not SQLAlchemy-style postgresql+psycopg://
+    if dsn.startswith("postgresql+psycopg://"):
+        return "postgresql://" + dsn[len("postgresql+psycopg://"):]
+    if dsn.startswith("postgresql+psycopg2://"):
+        return "postgresql://" + dsn[len("postgresql+psycopg2://"):]
+    return dsn
+
+
 def run(dsn, lang="en", limit=500):
     started = time.monotonic()
-    conn = psycopg2.connect(dsn)
+    conn = psycopg2.connect(_normalize_dsn(dsn))
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     # Kafka producer for downstream jobs
@@ -156,7 +169,7 @@ def run(dsn, lang="en", limit=500):
         if not title:
             continue
 
-        rev, wt = fetch_latest_wikitext(session, wikipedia_limiter, lang, title)
+        page_id, rev, wt = fetch_latest_wikitext(session, wikipedia_limiter, lang, title)
         if not wt:
             continue
 
@@ -164,19 +177,77 @@ def run(dsn, lang="en", limit=500):
         if not text:
             continue
 
+        text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        page_url = f"https://{lang}.wikipedia.org/wiki/{title}"
+
         cur.execute(
             """
           UPDATE bio_text
-             SET wiki_lang=%s,
-                 wiki_page=%s,
-                 wiki_rev_id=%s,
+             SET lang=%s,
+                 wiki_pageid=%s,
+                 rev_id=%s,
+                 url=%s,
                  license=%s,
                  text=%s,
-                 meta = COALESCE(meta,'{}'::jsonb) || jsonb_build_object('source','wikitext')
+                 text_sha256=%s,
+                 text_hash=%s,
+                 retrieved_at=NOW(),
+                 char_count=%s,
+                 source=%s,
+                 updated_at=NOW()
            WHERE person_id=%s
+             AND (rev_id = 0 OR rev_id IS NULL)
         """,
-            (lang, title, rev, "CC BY-SA 4.0 (Wikipedia)", text, person_id),
+            (
+                lang,
+                page_id,
+                rev or 0,
+                page_url,
+                "CC BY-SA 4.0 (Wikipedia)",
+                text,
+                text_hash,
+                text_hash,
+                len(text),
+                f"fetch_bio:{lang}",
+                person_id,
+            ),
         )
+        if cur.rowcount == 0:
+            cur.execute(
+                """
+              INSERT INTO bio_text
+                  (person_id, qid, lang, wiki_pageid, rev_id, url, license, text, text_sha256, text_hash,
+                   retrieved_at, char_count, source, updated_at)
+              VALUES
+                  (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s, %s, NOW())
+              ON CONFLICT (person_id, rev_id) DO UPDATE
+                SET lang=EXCLUDED.lang,
+                    wiki_pageid=EXCLUDED.wiki_pageid,
+                    url=EXCLUDED.url,
+                    license=EXCLUDED.license,
+                    text=EXCLUDED.text,
+                    text_sha256=EXCLUDED.text_sha256,
+                    text_hash=EXCLUDED.text_hash,
+                    retrieved_at=NOW(),
+                    char_count=EXCLUDED.char_count,
+                    source=EXCLUDED.source,
+                    updated_at=NOW()
+            """,
+                (
+                    person_id,
+                    r["qid"],
+                    lang,
+                    page_id,
+                    rev or 0,
+                    page_url,
+                    "CC BY-SA 4.0 (Wikipedia)",
+                    text,
+                    text_hash,
+                    text_hash,
+                    len(text),
+                    f"fetch_bio:{lang}",
+                ),
+            )
 
         wrote += 1
         enriched_ids.append(person_id)

@@ -5,6 +5,14 @@ import os
 import sys
 from .fetch_bio import run
 
+def _normalize_dsn(dsn: str) -> str:
+    # psycopg2 expects postgresql://, not SQLAlchemy-style postgresql+psycopg://
+    if dsn.startswith("postgresql+psycopg://"):
+        return "postgresql://" + dsn[len("postgresql+psycopg://"):]
+    if dsn.startswith("postgresql+psycopg2://"):
+        return "postgresql://" + dsn[len("postgresql+psycopg2://"):]
+    return dsn
+
 app = FastAPI(title="Fetch Bio API", version="0.1.0")
 
 class FetchBioRequest(BaseModel):
@@ -28,6 +36,7 @@ def fetch_bio_endpoint(request: FetchBioRequest = FetchBioRequest()):
     dsn = os.getenv("PG_DSN") or os.getenv("DATABASE_URL")
     if not dsn:
         raise HTTPException(status_code=500, detail="PG_DSN or DATABASE_URL must be set")
+    dsn = _normalize_dsn(dsn)
     
     try:
         # Run fetch_bio and get the count of written records
