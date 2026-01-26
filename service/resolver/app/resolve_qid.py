@@ -1,15 +1,58 @@
-# app/workers/resolve_qid.py
 import time
+import os
+import random
 import requests, psycopg2, psycopg2.extras
 
-def search_qid(name):
-    r = requests.get("https://www.wikidata.org/w/api.php", params={
-        "action":"wbsearchentities","language":"en","format":"json","type":"item","search":name
-    }, timeout=20); r.raise_for_status(); return r.json().get("search",[])
 
-def dob_matches(qid, dob_iso):
+class RateLimiter:
+    def __init__(self, min_interval_sec: float, jitter_sec: float = 0.0):
+        self._min_interval = max(min_interval_sec, 0.0)
+        self._jitter = max(jitter_sec, 0.0)
+        self._next_time = 0.0
+
+    def wait(self) -> None:
+        now = time.monotonic()
+        if now < self._next_time:
+            time.sleep(self._next_time - now)
+        if self._jitter:
+            time.sleep(random.uniform(0, self._jitter))
+        self._next_time = time.monotonic() + self._min_interval
+
+
+def _wiki_session() -> requests.Session:
+    user_agent = os.getenv(
+        "WIKI_USER_AGENT",
+        "astro-reason/0.1 (contact: you@example.com)",
+    )
+    session = requests.Session()
+    session.headers.update({"User-Agent": user_agent})
+    return session
+
+def search_qid(session: requests.Session, limiter: RateLimiter, name):
+    limiter.wait()
+    r = session.get(
+        "https://www.wikidata.org/w/api.php",
+        params={
+            "action": "wbsearchentities",
+            "language": "en",
+            "format": "json",
+            "type": "item",
+            "search": name,
+        },
+        timeout=20,
+    )
+    r.raise_for_status()
+    return r.json().get("search", [])
+
+def dob_matches(session: requests.Session, limiter: RateLimiter, qid, dob_iso):
     try:
-        j = requests.get(f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json", timeout=20).json()
+        limiter.wait()
+        r = session.get(
+            f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json",
+            timeout=20,
+        )
+        r.raise_for_status()
+        j = r.json()
         time = j["entities"][qid]["claims"]["P569"][0]["mainsnak"]["datavalue"]["value"]["time"]
         return dob_iso and dob_iso in time
     except Exception: return False
@@ -18,6 +61,11 @@ def run(dsn):
     started = time.monotonic()
     conn = psycopg2.connect(dsn)
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    session = _wiki_session()
+    wikidata_limiter = RateLimiter(
+        float(os.getenv("WIKIDATA_MIN_INTERVAL_SEC", "1.0")),
+        float(os.getenv("WIKIDATA_JITTER_SEC", "0.2")),
+    )
     cur.execute("""
       SELECT pr.person_id, pr.full_name, to_char(b.date,'YYYY-MM-DD') AS dob
       FROM person_raw pr
@@ -29,10 +77,10 @@ def run(dsn):
     rows = cur.fetchall()
     hits = 0
     for r in rows:
-        cands = search_qid(r["full_name"])
+        cands = search_qid(session, wikidata_limiter, r["full_name"])
         qid = None
         for c in cands[:10]:
-            if dob_matches(c["id"], r["dob"]):
+            if dob_matches(session, wikidata_limiter, c["id"], r["dob"]):
                 qid = c["id"]; break
         if not qid and cands: qid = cands[0]["id"]
         if not qid: continue

@@ -13,6 +13,7 @@ import json
 import os
 import time
 import uuid
+import random
 
 import psycopg2
 import psycopg2.extras
@@ -20,15 +21,52 @@ import requests
 import re
 from confluent_kafka import Producer
 
-def sitelink(qid, lang="en"):
-    j = requests.get(f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json", timeout=20).json()
-    ent = j["entities"][qid]; key=f"{lang}wiki"
-    return ent.get("sitelinks",{}).get(key,{}).get("title")
+class RateLimiter:
+    def __init__(self, min_interval_sec: float, jitter_sec: float = 0.0):
+        self._min_interval = max(min_interval_sec, 0.0)
+        self._jitter = max(jitter_sec, 0.0)
+        self._next_time = 0.0
 
-def fetch_latest_wikitext(lang, title):
-    r = requests.get(f"https://{lang}.wikipedia.org/w/rest.php/v1/page/{title}", timeout=20); r.raise_for_status()
+    def wait(self) -> None:
+        now = time.monotonic()
+        if now < self._next_time:
+            time.sleep(self._next_time - now)
+        if self._jitter:
+            time.sleep(random.uniform(0, self._jitter))
+        self._next_time = time.monotonic() + self._min_interval
+
+
+def _wiki_session() -> requests.Session:
+    user_agent = os.getenv(
+        "WIKI_USER_AGENT",
+        "astro-reason/0.1 (contact: you@example.com)",
+    )
+    session = requests.Session()
+    session.headers.update({"User-Agent": user_agent})
+    return session
+
+
+def sitelink(session: requests.Session, limiter: RateLimiter, qid, lang="en"):
+    limiter.wait()
+    r = session.get(
+        f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json",
+        timeout=20,
+    )
+    r.raise_for_status()
     j = r.json()
-    return j.get("latest",{}).get("id"), j.get("source")
+    ent = j["entities"][qid]
+    key = f"{lang}wiki"
+    return ent.get("sitelinks", {}).get(key, {}).get("title")
+
+def fetch_latest_wikitext(session: requests.Session, limiter: RateLimiter, lang, title):
+    limiter.wait()
+    r = session.get(
+        f"https://{lang}.wikipedia.org/w/rest.php/v1/page/{title}",
+        timeout=20,
+    )
+    r.raise_for_status()
+    j = r.json()
+    return j.get("latest", {}).get("id"), j.get("source")
 
 def clean_wikitext(wt):
     wt = re.sub(r"==.*?==", "\n", wt)
@@ -91,6 +129,15 @@ def run(dsn, lang="en", limit=500):
 
     # Kafka producer for downstream jobs
     producer = _get_producer()
+    session = _wiki_session()
+    wikidata_limiter = RateLimiter(
+        float(os.getenv("WIKIDATA_MIN_INTERVAL_SEC", "1.0")),
+        float(os.getenv("WIKIDATA_JITTER_SEC", "0.2")),
+    )
+    wikipedia_limiter = RateLimiter(
+        float(os.getenv("WIKIPEDIA_MIN_INTERVAL_SEC", "1.0")),
+        float(os.getenv("WIKIPEDIA_JITTER_SEC", "0.2")),
+    )
 
     cur.execute(
         "SELECT person_id, qid FROM bio_text "
@@ -105,11 +152,11 @@ def run(dsn, lang="en", limit=500):
 
     for r in rows:
         person_id = r["person_id"]
-        title = sitelink(r["qid"], lang)
+        title = sitelink(session, wikidata_limiter, r["qid"], lang)
         if not title:
             continue
 
-        rev, wt = fetch_latest_wikitext(lang, title)
+        rev, wt = fetch_latest_wikitext(session, wikipedia_limiter, lang, title)
         if not wt:
             continue
 

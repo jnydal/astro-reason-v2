@@ -67,6 +67,24 @@ The Resolver service runs automatically:
 docker compose logs -f resolver
 ```
 
+**Rate limiting (recommended)**:
+- Default throttles are 1 request/sec to Wikidata and 1 request/sec to Wikipedia
+- Add jitter to avoid synchronized bursts
+- Set a clear User-Agent with contact info
+
+Example `.env`:
+```bash
+WIKI_USER_AGENT=astro-reason/0.1 (contact: you@example.com)
+WIKIDATA_MIN_INTERVAL_SEC=1.0
+WIKIDATA_JITTER_SEC=0.2
+WIKIPEDIA_MIN_INTERVAL_SEC=1.0
+WIKIPEDIA_JITTER_SEC=0.2
+```
+
+Safe schedule suggestion:
+- Run `fetch-bio` in small batches (e.g., `limit=200`)
+- Trigger every 10–15 minutes for sustained ingestion
+
 ### Step 3: Generate Embeddings
 
 Embeddings worker processes jobs automatically:
