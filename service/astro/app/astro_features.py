@@ -30,9 +30,6 @@ import psycopg2.extras
 
 import os
 
-from service.core.db import pg_conn, pg_cursor
-from service.core.settings import settings
-
 # ---------------------------
 # Backend selection
 # ---------------------------
@@ -333,9 +330,7 @@ def compute_features_for_person(row, backend: str) -> Dict[str, object]:
     # --- longitudes & houses
     if backend == "swisseph":
         ephe_path = (
-            getattr(settings, "SWEPH_EPHE_PATH", None)
-            or getattr(settings, "SE_EPHE_PATH", None)
-            or os.getenv("SWEPH_EPHE_PATH")
+            os.getenv("SWEPH_EPHE_PATH")
             or os.getenv("SE_EPHE_PATH")
         )
         if ephe_path:
@@ -400,6 +395,8 @@ def run(batch_size: int = 128):
         raise RuntimeError("Install 'pyswisseph' (preferred) or 'skyfield' to compute astro features.")
 
     backend = "swisseph" if _BACKEND == "swisseph" else "skyfield"
+
+    from service.core.db import pg_conn, pg_cursor
 
     with pg_conn() as conn, pg_cursor(conn) as cur:
         # Find work
