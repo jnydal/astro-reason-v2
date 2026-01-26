@@ -124,7 +124,7 @@ class QidResolver {
                 .innerJoin(Birth, { PersonRaw.id }, { Birth.id })
                 .leftJoin(BioText, { PersonRaw.id }, { BioText.personId })
                 .slice(PersonRaw.id, PersonRaw.name, Birth.date)
-                .select { BioText.personId.isNull() }
+                .select { BioText.qid.isNull() or (BioText.qid eq "") }
                 .limit(limit)
                 .map { row ->
                     PendingPerson(

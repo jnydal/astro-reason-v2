@@ -160,7 +160,13 @@ def swe_planet_longitudes(jd_ut: float, cfg: SweConfig) -> Dict[str, float]:
     }
     out = {}
     for name, code in mp.items():
-        lon, lat, dist, lon_speed, lat_speed, dist_speed = swe.calc_ut(jd_ut, code, flags)
+        result = swe.calc_ut(jd_ut, code, flags)
+        if isinstance(result, tuple) and len(result) == 2:
+            # Newer pyswisseph returns (xx, retflag)
+            xx, _retflag = result
+            lon, lat, dist, lon_speed, lat_speed, dist_speed = xx
+        else:
+            lon, lat, dist, lon_speed, lat_speed, dist_speed = result
         out[name] = wrap360(lon)
     return out
 
