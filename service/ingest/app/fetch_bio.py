@@ -153,8 +153,9 @@ def run(dsn, lang="en", limit=500):
     )
 
     cur.execute(
-        "SELECT person_id, qid FROM bio_text "
-        "WHERE text IS NULL AND qid IS NOT NULL "
+        "SELECT person_id, qid, text, source FROM bio_text "
+        "WHERE qid IS NOT NULL "
+        "  AND (source IS NULL OR source NOT LIKE 'fetch_bio:%') "
         "LIMIT %s",
         (limit,),
     )
@@ -176,9 +177,19 @@ def run(dsn, lang="en", limit=500):
         text = clean_wikitext(wt)
         if not text:
             continue
+        existing_text = (r.get("text") or "").strip()
+        combined_text = text
+        if existing_text:
+            # Append fetched bio only if it's not already present.
+            combined_text = existing_text if text in existing_text else f"{existing_text}\n\n{text}"
 
-        text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        text_hash = hashlib.sha256(combined_text.encode("utf-8")).hexdigest()
         page_url = f"https://{lang}.wikipedia.org/wiki/{title}"
+        existing_source = (r.get("source") or "").strip()
+        if existing_source and f"fetch_bio:{lang}" not in existing_source:
+            combined_source = f"{existing_source},fetch_bio:{lang}"
+        else:
+            combined_source = f"fetch_bio:{lang}"
 
         cur.execute(
             """
@@ -204,11 +215,11 @@ def run(dsn, lang="en", limit=500):
                 rev or 0,
                 page_url,
                 "CC BY-SA 4.0 (Wikipedia)",
-                text,
+                combined_text,
                 text_hash,
                 text_hash,
-                len(text),
-                f"fetch_bio:{lang}",
+                len(combined_text),
+                combined_source,
                 person_id,
             ),
         )
@@ -241,11 +252,11 @@ def run(dsn, lang="en", limit=500):
                     rev or 0,
                     page_url,
                     "CC BY-SA 4.0 (Wikipedia)",
-                    text,
+                    combined_text,
                     text_hash,
                     text_hash,
-                    len(text),
-                    f"fetch_bio:{lang}",
+                    len(combined_text),
+                    combined_source,
                 ),
             )
 
