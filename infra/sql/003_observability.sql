@@ -3,8 +3,16 @@
 CREATE OR REPLACE VIEW pipeline_counts AS
 SELECT
   (SELECT COUNT(*) FROM person_raw) AS people_total,
-  (SELECT COUNT(*) FROM nlp_traits) AS traits_scored,
-  (SELECT COUNT(DISTINCT person_id) FROM embeddings) AS embeddings_computed,
+  (SELECT COUNT(*) FROM nlp_vectors) AS traits_scored,
+  (SELECT COUNT(DISTINCT person_id) FROM (
+      SELECT person_id FROM embeddings_384
+      UNION
+      SELECT person_id FROM embeddings_768
+      UNION
+      SELECT person_id FROM embeddings_1024
+      UNION
+      SELECT person_id FROM embeddings_1536
+  ) emb_all) AS embeddings_computed,
   (SELECT COUNT(*) FROM astro_features) AS astro_features_computed,
   (SELECT COUNT(*) FROM provenance_event
      WHERE stage = 'correlation'
@@ -37,8 +45,16 @@ SELECT
   (af.person_id IS NULL) AS missing_astro
 FROM person_raw pr
 LEFT JOIN pipeline_latest_event ple ON ple.person_id = pr.id
-LEFT JOIN (SELECT DISTINCT person_id FROM nlp_traits) nv ON nv.person_id = pr.id
-LEFT JOIN (SELECT DISTINCT person_id FROM embeddings) emb ON emb.person_id = pr.id
+LEFT JOIN (SELECT DISTINCT person_id FROM nlp_vectors) nv ON nv.person_id = pr.id
+LEFT JOIN (
+    SELECT person_id FROM embeddings_384
+    UNION
+    SELECT person_id FROM embeddings_768
+    UNION
+    SELECT person_id FROM embeddings_1024
+    UNION
+    SELECT person_id FROM embeddings_1536
+) emb ON emb.person_id = pr.id
 LEFT JOIN astro_features af ON af.person_id = pr.id
 WHERE ple.last_event_at IS NOT NULL
   AND ple.last_event_at < NOW() - INTERVAL '24 hours'

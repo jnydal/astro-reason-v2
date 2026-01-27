@@ -85,7 +85,7 @@ def embed_person_bios(payload: dict):
         FROM bio_text bt
         LEFT JOIN embeddings e
           ON e.person_id = bt.person_id AND e.model_name = %s
-        WHERE bt.person_id = ANY(%s)
+        WHERE bt.person_id = ANY(%s::uuid[])
     """, (model_name, person_ids))
     rows = cur.fetchall()
 

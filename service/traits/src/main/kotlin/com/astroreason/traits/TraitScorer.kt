@@ -50,7 +50,7 @@ data class TraitResponse(
 data class OllamaChatRequest(
     val model: String,
     val messages: List<ChatMessage>,
-    val options: Map<String, String> = emptyMap(),
+    val options: OllamaOptions = OllamaOptions(),
     val stream: Boolean = false
 )
 
@@ -64,6 +64,21 @@ data class ChatMessage(
 data class OllamaChatResponse(
     val message: ChatMessage? = null,
     val response: String? = null
+)
+
+@Serializable
+data class OllamaOptions(
+    val temperature: Double = 0.1,
+    val num_ctx: Int = 4096,
+    val repeat_penalty: Double = 1.05
+)
+
+@Serializable
+data class OllamaGenerateRequest(
+    val model: String,
+    val prompt: String,
+    val options: OllamaOptions = OllamaOptions(),
+    val stream: Boolean = false
 )
 
 class TraitScorer(
@@ -126,15 +141,11 @@ Return only JSON.
             ChatMessage(role = "user", content = buildVectorPrompt(bioText))
         )
         
-        val options = mapOf(
-            "temperature" to "0.1",
-            "num_ctx" to "4096",
-            "repeat_penalty" to "1.05"
-        )
+        val options = OllamaOptions()
         
         // Try /api/chat first
         val response = try {
-            client.post("$baseUrl/api/chat") {
+            val httpResponse = client.post("$baseUrl/api/chat") {
                 contentType(ContentType.Application.Json)
                 setBody(OllamaChatRequest(
                     model = model,
@@ -143,9 +154,13 @@ Return only JSON.
                     stream = false
                 ))
                 timeout {
-                    requestTimeoutMillis = 180000
+                    requestTimeoutMillis = 600000
                 }
-            }.body<OllamaChatResponse>()
+            }
+            if (!httpResponse.status.isSuccess()) {
+                throw IllegalStateException("Ollama chat failed: ${httpResponse.status}")
+            }
+            httpResponse.body<OllamaChatResponse>()
         } catch (e: Exception) {
             // Fallback to /api/generate
             val userParts = messages.filter { it.role == "user" }.joinToString("\n\n") { it.content }
@@ -153,14 +168,14 @@ Return only JSON.
             
             val generateResponse = client.post("$baseUrl/api/generate") {
                 contentType(ContentType.Application.Json)
-                setBody(mapOf(
-                    "model" to model,
-                    "prompt" to prompt,
-                    "options" to options,
-                    "stream" to false
+                setBody(OllamaGenerateRequest(
+                    model = model,
+                    prompt = prompt,
+                    options = options,
+                    stream = false
                 ))
                 timeout {
-                    requestTimeoutMillis = 180000
+                    requestTimeoutMillis = 600000
                 }
             }.body<Map<String, Any>>()
             
@@ -188,7 +203,7 @@ Return only JSON.
                     stream = false
                 ))
                 timeout {
-                    requestTimeoutMillis = 180000
+                    requestTimeoutMillis = 600000
                 }
             }.body<OllamaChatResponse>()
             
