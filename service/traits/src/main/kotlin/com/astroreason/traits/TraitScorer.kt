@@ -8,10 +8,13 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.timeout
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.security.MessageDigest
 
 @Serializable
@@ -166,7 +169,7 @@ Return only JSON.
             val userParts = messages.filter { it.role == "user" }.joinToString("\n\n") { it.content }
             val prompt = "$systemPrompt\n\n$userParts"
             
-            val generateResponse = client.post("$baseUrl/api/generate") {
+            val generateResponseText = client.post("$baseUrl/api/generate") {
                 contentType(ContentType.Application.Json)
                 setBody(OllamaGenerateRequest(
                     model = model,
@@ -177,9 +180,9 @@ Return only JSON.
                 timeout {
                     requestTimeoutMillis = 600000
                 }
-            }.body<Map<String, Any>>()
-            
-            OllamaChatResponse(response = generateResponse["response"] as? String)
+            }.bodyAsText()
+
+            OllamaChatResponse(response = extractGenerateResponse(generateResponseText))
         }
         
         val content = response.message?.content ?: response.response ?: 
@@ -219,5 +222,27 @@ Return only JSON.
         val digest = MessageDigest.getInstance("SHA-256")
         val hash = digest.digest(prompt.toByteArray())
         return hash.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun extractGenerateResponse(raw: String): String? {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return null
+
+        val builder = StringBuilder()
+        val lines = trimmed.lines().filter { it.isNotBlank() }
+        for (line in lines) {
+            try {
+                val jsonObj = Json.parseToJsonElement(line).jsonObject
+                val chunk = jsonObj["response"]?.jsonPrimitive?.content
+                if (chunk != null) {
+                    builder.append(chunk)
+                }
+                val done = jsonObj["done"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() == true
+                if (done) break
+            } catch (_: Exception) {
+                // Ignore malformed lines; rely on valid chunks
+            }
+        }
+        return builder.toString().ifBlank { null }
     }
 }

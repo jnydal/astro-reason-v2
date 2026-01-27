@@ -21,6 +21,7 @@ Run:
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass
 from datetime import datetime, time as dtime
 from typing import Dict, List, Tuple, Optional
@@ -393,9 +394,10 @@ def _birth_has_tz_offset(cur) -> bool:
     return cur.fetchone() is not None
 
 
-def run(batch_size: int = 128):
+def run(batch_size: int = 128) -> int:
     """
     Process births that don't yet have astro_features.
+    Returns number of rows written.
     """
     if _BACKEND is None:
         raise RuntimeError("Install 'pyswisseph' (preferred) or 'skyfield' to compute astro features.")
@@ -418,7 +420,7 @@ def run(batch_size: int = 128):
 
         if not rows:
             print("No people pending astro feature computation.")
-            return
+            return 0
 
         wrote = 0
         for r in rows:
@@ -453,7 +455,26 @@ def run(batch_size: int = 128):
                 print(f"[astro_features] Error person_id={r['person_id']}: {e}")
 
         print(f"✅ astro_features: wrote {wrote} rows using backend={backend}")
+        return wrote
+
+
+def run_forever():
+    """
+    Continuous worker loop with backoff when idle.
+    """
+    batch_size = int(os.getenv("ASTRO_BATCH_SIZE", "128"))
+    idle_sleep = float(os.getenv("ASTRO_IDLE_SLEEP_SECONDS", "2"))
+    max_idle_sleep = float(os.getenv("ASTRO_MAX_IDLE_SLEEP_SECONDS", "30"))
+
+    sleep_seconds = idle_sleep
+    while True:
+        wrote = run(batch_size=batch_size)
+        if wrote > 0:
+            sleep_seconds = idle_sleep
+            continue
+        time.sleep(sleep_seconds)
+        sleep_seconds = min(sleep_seconds * 2, max_idle_sleep)
 
 
 if __name__ == "__main__":
-    run()
+    run_forever()
