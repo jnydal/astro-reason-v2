@@ -264,7 +264,7 @@ private fun parseDoubleMap(raw: String): Map<String, Double> {
     }.toMap()
 }
 
-private fun parsePgVector(raw: String): List<Double> {
+internal fun parsePgVector(raw: String): List<Double> {
     val trimmed = raw.trim()
         .removePrefix("[")
         .removeSuffix("]")
