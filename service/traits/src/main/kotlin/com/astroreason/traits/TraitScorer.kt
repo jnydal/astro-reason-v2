@@ -13,6 +13,7 @@ import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.security.MessageDigest
@@ -243,6 +244,43 @@ Return only JSON.
         return builder.toString()
     }
 
+    private fun extractOpenAiResponse(raw: String): String? {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return null
+
+        val lines = trimmed.lines().map { it.trim() }.filter { it.isNotBlank() }
+        if (lines.any { it.startsWith("data:") }) {
+            val builder = StringBuilder()
+            for (line in lines) {
+                if (!line.startsWith("data:")) continue
+                val payload = line.removePrefix("data:").trim()
+                if (payload == "[DONE]") break
+                try {
+                    val jsonObj = Json.parseToJsonElement(payload).jsonObject
+                    val choice = jsonObj["choices"]?.jsonArray?.firstOrNull()?.jsonObject
+                    val delta = choice?.get("delta")?.jsonObject
+                    val message = choice?.get("message")?.jsonObject
+                    val chunk = delta?.get("content")?.jsonPrimitive?.content
+                        ?: message?.get("content")?.jsonPrimitive?.content
+                        ?: choice?.get("text")?.jsonPrimitive?.content
+                    if (chunk != null) {
+                        builder.append(chunk)
+                    }
+                } catch (_: Exception) {
+                    // Ignore malformed lines; rely on valid chunks
+                }
+            }
+            return builder.toString().ifBlank { null }
+        }
+
+        return try {
+            val parsed = Json.decodeFromString<OpenAiChatResponse>(trimmed)
+            parsed.choices.firstOrNull()?.message?.content ?: parsed.choices.firstOrNull()?.text
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private suspend fun fetchContent(messages: List<ChatMessage>): String {
         val options = OllamaOptions()
         val errors = mutableListOf<String>()
@@ -325,13 +363,8 @@ Return only JSON.
             if (!httpResponse.status.isSuccess()) {
                 throw IllegalStateException("status ${httpResponse.status}")
             }
-            val responseType = httpResponse.contentType()?.withoutParameters()
-            val parsed = if (responseType == ContentType.Application.Json) {
-                httpResponse.body<OpenAiChatResponse>()
-            } else {
-                Json.decodeFromString<OpenAiChatResponse>(httpResponse.bodyAsText())
-            }
-            parsed.choices.firstOrNull()?.message?.content ?: parsed.choices.firstOrNull()?.text
+            val raw = httpResponse.bodyAsText()
+            extractOpenAiResponse(raw)
         } ?: attempt("openai /v1/completions") {
             val httpResponse = client.post("$baseUrl/v1/completions") {
                 contentType(ContentType.Application.Json)
@@ -348,13 +381,8 @@ Return only JSON.
             if (!httpResponse.status.isSuccess()) {
                 throw IllegalStateException("status ${httpResponse.status}")
             }
-            val responseType = httpResponse.contentType()?.withoutParameters()
-            val parsed = if (responseType == ContentType.Application.Json) {
-                httpResponse.body<OpenAiChatResponse>()
-            } else {
-                Json.decodeFromString<OpenAiChatResponse>(httpResponse.bodyAsText())
-            }
-            parsed.choices.firstOrNull()?.text ?: parsed.choices.firstOrNull()?.message?.content
+            val raw = httpResponse.bodyAsText()
+            extractOpenAiResponse(raw)
         } ?: throw IllegalStateException("No response from LLM. Attempts: ${errors.joinToString("; ")}")
     }
 }

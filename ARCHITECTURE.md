@@ -36,7 +36,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 
 1. Ingest Worker
    ├─→ Parses XML → PostgreSQL (person_raw, birth, bio_text)
-   └─→ Enqueues → Kafka (embeddings topic)
+   └─→ No embeddings enqueued here (waits for wiki enrichment)
 
 2. Embeddings Worker (Python)
    ├─→ Reads from Kafka (embeddings topic)
@@ -50,6 +50,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 4. Fetch-Bio Service (Python - Containerized)
    ├─→ Fetches Wikipedia biographies
    └─→ Updates → PostgreSQL (bio_text.text)
+       └─→ Enqueues → Kafka (embeddings topic)
 
 5. Traits Worker (Kotlin)
    ├─→ Reads from Kafka (traits topic)
@@ -207,7 +208,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
    
 2. Parse & Ingest
    API → Kafka Topic → Worker-Ingest → PostgreSQL
-   Worker-Ingest → Kafka Topic (embeddings)
+   (Embeddings are enqueued after wiki enrichment)
    
 3. Resolve QIDs
    Resolver → Wikidata API → PostgreSQL
@@ -215,6 +216,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
    
 4. Fetch Biographies
    Fetch-Bio → Wikipedia API → PostgreSQL
+   Fetch-Bio → Kafka Topic (embeddings)
    
 5. Generate Embeddings
    Kafka Topic → Embeddings Worker → PostgreSQL
