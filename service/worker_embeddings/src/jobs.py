@@ -18,6 +18,7 @@ DSN = os.getenv("DATABASE_URL", "").replace("postgresql+psycopg://", "postgresql
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 KAFKA_GROUP_ID = os.getenv("KAFKA_GROUP_ID", "embeddings-worker")
 KAFKA_TOPIC = os.getenv("KAFKA_EMBEDDINGS_TOPIC", "embeddings")
+EMBED_CHUNK_SIZE = max(1, int(os.getenv("EMBEDDINGS_CHUNK_SIZE", "32")))
 
 def _update_job_status(job_id: str, status: str, result: str | None = None, exc_info: str | None = None) -> None:
     if not DSN:
@@ -49,7 +50,12 @@ def _update_job_status(job_id: str, status: str, result: str | None = None, exc_
     cur.close()
     conn.close()
 
-def embed_person_bios(payload: dict):
+def _chunked(items, chunk_size: int):
+    for i in range(0, len(items), chunk_size):
+        yield items[i:i + chunk_size]
+
+
+def embed_person_bios(payload: dict, heartbeat=None):
     """Kafka job: Embed bios for given person_ids and upsert into embeddings table."""
     started = time.monotonic()
     person_ids = payload.get("person_ids") or []
@@ -106,46 +112,51 @@ def embed_person_bios(payload: dict):
         conn.close()
         return {"status": "noop", "count": 0}
 
-    texts = [r["text"] for r in todo]
-    pids  = [r["person_id"] for r in todo]
-
-    # Encode embeddings
     model = SentenceTransformer(model_name)
-    embeddings = model.encode(
-        texts, batch_size=8, show_progress_bar=False, normalize_embeddings=True
-    )
-    embeddings = np.array(embeddings, dtype=np.float32)
+    processed = 0
 
-    # Upsert into dimensioned embeddings table
-    for pid, vec, row in zip(pids, embeddings, todo):
-        dim = int(len(vec))
-        if dim not in (384, 768, 1024, 1536):
-            print(f"⚠️ Unsupported embedding dimension {dim} for person_id={pid}. Skipping.")
-            continue
-        table_name = f"embeddings_{dim}"
-        cur.execute(
-            sql.SQL("""
-                INSERT INTO {table} (person_id, model_name, dim, vector, text_hash, meta, source, updated_at)
-                VALUES (%s, %s, %s, %s, %s, jsonb_build_object('provider','sentence-transformers'), %s, NOW())
-                ON CONFLICT (person_id, model_name) DO UPDATE
-                  SET dim = EXCLUDED.dim,
-                      vector = EXCLUDED.vector,
-                      text_hash = EXCLUDED.text_hash,
-                      meta = EXCLUDED.meta,
-                      source = EXCLUDED.source,
-                      updated_at = NOW()
-            """).format(table=sql.Identifier(table_name)),
-            (pid, model_name, dim, vec, row["text_hash"], source),
+    for chunk in _chunked(todo, EMBED_CHUNK_SIZE):
+        if heartbeat:
+            heartbeat()
+
+        texts = [r["text"] for r in chunk]
+        pids = [r["person_id"] for r in chunk]
+
+        embeddings = model.encode(
+            texts, batch_size=8, show_progress_bar=False, normalize_embeddings=True
         )
+        embeddings = np.array(embeddings, dtype=np.float32)
 
-    conn.commit()
+        for pid, vec, row in zip(pids, embeddings, chunk):
+            dim = int(len(vec))
+            if dim not in (384, 768, 1024, 1536):
+                print(f"⚠️ Unsupported embedding dimension {dim} for person_id={pid}. Skipping.")
+                continue
+            table_name = f"embeddings_{dim}"
+            cur.execute(
+                sql.SQL("""
+                    INSERT INTO {table} (person_id, model_name, dim, vector, text_hash, meta, source, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, jsonb_build_object('provider','sentence-transformers'), %s, NOW())
+                    ON CONFLICT (person_id, model_name) DO UPDATE
+                      SET dim = EXCLUDED.dim,
+                          vector = EXCLUDED.vector,
+                          text_hash = EXCLUDED.text_hash,
+                          meta = EXCLUDED.meta,
+                          source = EXCLUDED.source,
+                          updated_at = NOW()
+                """).format(table=sql.Identifier(table_name)),
+                (pid, model_name, dim, vec, row["text_hash"], source),
+            )
+
+        conn.commit()
+        processed += len(chunk)
 
     # Provenance logging
     log_event(
         cur,
         stage="embeddings",
         status="ok",
-        count=len(todo),
+        count=processed,
         duration_ms=int((time.monotonic() - started) * 1000),
         meta={
             "model": model_name,
@@ -156,8 +167,8 @@ def embed_person_bios(payload: dict):
     conn.commit()
     cur.close(); conn.close()
 
-    print(f"✅ Embedded {len(todo)} bios.")
-    return {"status": "ok", "count": len(todo)}
+    print(f"✅ Embedded {processed} bios.")
+    return {"status": "ok", "count": processed}
 
 
 def _consume_loop():
@@ -188,7 +199,7 @@ def _consume_loop():
                 kwargs = payload.get("kwargs") or {}
                 if job_id:
                     _update_job_status(job_id, "STARTED")
-                result = embed_person_bios(kwargs)
+                result = embed_person_bios(kwargs, heartbeat=lambda: consumer.poll(0))
                 if job_id:
                     _update_job_status(job_id, "FINISHED", result=json.dumps(result))
             except Exception as exc:

@@ -137,6 +137,15 @@ These structured, interpretable vectors allow direct comparison against astrolog
 docker compose up -d --build
 ```
 
+### Kafka topics (required)
+
+The pipeline expects the `traits` and `embeddings` topics to exist. Create them once:
+
+```bash
+docker compose exec -T kafka rpk topic create traits
+docker compose exec -T kafka rpk topic create embeddings
+```
+
 Verify:
 
 ```bash

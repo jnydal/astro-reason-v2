@@ -153,10 +153,31 @@ def run(dsn, lang="en", limit=500):
     )
 
     cur.execute(
-        "SELECT person_id, qid, text, source FROM bio_text "
-        "WHERE qid IS NOT NULL "
-        "  AND (source IS NULL OR source NOT LIKE 'fetch_bio:%') "
-        "LIMIT %s",
+        """
+        SELECT
+            pr.id AS person_id,
+            COALESCE(el.qid, bt.qid) AS qid,
+            bt.text AS text,
+            bt.source AS source
+        FROM person_raw pr
+        LEFT JOIN entity_link el
+          ON el.person_id = pr.id
+        LEFT JOIN LATERAL (
+            SELECT qid, text, source
+            FROM bio_text
+            WHERE person_id = pr.id
+            ORDER BY retrieved_at DESC NULLS LAST
+            LIMIT 1
+        ) bt ON TRUE
+        WHERE COALESCE(el.qid, bt.qid) IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM bio_text b2
+            WHERE b2.person_id = pr.id
+              AND b2.source LIKE 'fetch_bio:%%'
+        )
+        LIMIT %s
+        """,
         (limit,),
     )
     rows = cur.fetchall()

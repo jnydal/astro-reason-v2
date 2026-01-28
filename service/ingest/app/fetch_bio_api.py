@@ -1,6 +1,7 @@
 # FastAPI wrapper for fetch_bio.py
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+import logging
 import os
 import sys
 from .fetch_bio import run
@@ -14,6 +15,7 @@ def _normalize_dsn(dsn: str) -> str:
     return dsn
 
 app = FastAPI(title="Fetch Bio API", version="0.1.0")
+logger = logging.getLogger("fetch-bio")
 
 class FetchBioRequest(BaseModel):
     lang: str = "en"
@@ -48,6 +50,7 @@ def fetch_bio_endpoint(request: FetchBioRequest = FetchBioRequest()):
             message=f"Fetched {written} biographies"
         )
     except Exception as e:
+        logger.exception("fetch_bio failed")
         raise HTTPException(status_code=500, detail=f"Error fetching bios: {str(e)}")
 
 if __name__ == "__main__":

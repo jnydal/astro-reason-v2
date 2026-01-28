@@ -163,7 +163,13 @@ Return only JSON.
             if (!httpResponse.status.isSuccess()) {
                 throw IllegalStateException("Ollama chat failed: ${httpResponse.status}")
             }
-            httpResponse.body<OllamaChatResponse>()
+            val responseType = httpResponse.contentType()?.withoutParameters()
+            if (responseType == ContentType.Application.Json) {
+                httpResponse.body<OllamaChatResponse>()
+            } else {
+                val raw = httpResponse.bodyAsText()
+                OllamaChatResponse(message = ChatMessage(role = "assistant", content = extractChatResponse(raw)))
+            }
         } catch (e: Exception) {
             // Fallback to /api/generate
             val userParts = messages.filter { it.role == "user" }.joinToString("\n\n") { it.content }
@@ -208,9 +214,16 @@ Return only JSON.
                 timeout {
                     requestTimeoutMillis = 600000
                 }
-            }.body<OllamaChatResponse>()
+            }
+            val retryType = retryResponse.contentType()?.withoutParameters()
+            val retryParsed = if (retryType == ContentType.Application.Json) {
+                retryResponse.body<OllamaChatResponse>()
+            } else {
+                val raw = retryResponse.bodyAsText()
+                OllamaChatResponse(message = ChatMessage(role = "assistant", content = extractChatResponse(raw)))
+            }
             
-            val retryContent = retryResponse.message?.content ?: retryResponse.response ?:
+            val retryContent = retryParsed.message?.content ?: retryParsed.response ?:
                 throw IllegalStateException("No response from LLM on retry")
             
             Json.decodeFromString<TraitResponse>(retryContent)
@@ -244,5 +257,28 @@ Return only JSON.
             }
         }
         return builder.toString().ifBlank { null }
+    }
+
+    private fun extractChatResponse(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return ""
+
+        val builder = StringBuilder()
+        val lines = trimmed.lines().filter { it.isNotBlank() }
+        for (line in lines) {
+            try {
+                val jsonObj = Json.parseToJsonElement(line).jsonObject
+                val message = jsonObj["message"]?.jsonObject
+                val chunk = message?.get("content")?.jsonPrimitive?.content
+                if (chunk != null) {
+                    builder.append(chunk)
+                }
+                val done = jsonObj["done"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() == true
+                if (done) break
+            } catch (_: Exception) {
+                // Ignore malformed lines; rely on valid chunks
+            }
+        }
+        return builder.toString()
     }
 }
