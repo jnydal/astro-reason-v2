@@ -84,6 +84,38 @@ data class OllamaGenerateRequest(
     val stream: Boolean = false
 )
 
+@Serializable
+data class OpenAiChatRequest(
+    val model: String,
+    val messages: List<OpenAiChatMessage>,
+    val temperature: Double = 0.1,
+    val stream: Boolean = false
+)
+
+@Serializable
+data class OpenAiChatMessage(
+    val role: String,
+    val content: String
+)
+
+@Serializable
+data class OpenAiCompletionRequest(
+    val model: String,
+    val prompt: String,
+    val temperature: Double = 0.1
+)
+
+@Serializable
+data class OpenAiChatChoice(
+    val message: OpenAiChatMessage? = null,
+    val text: String? = null
+)
+
+@Serializable
+data class OpenAiChatResponse(
+    val choices: List<OpenAiChatChoice> = emptyList()
+)
+
 class TraitScorer(
     private val baseUrl: String,
     val model: String
@@ -97,6 +129,7 @@ class TraitScorer(
         }
         install(HttpTimeout)
     }
+    private val apiKey = System.getenv("OPENAI_API_KEY") ?: System.getenv("LLM_API_KEY")
     
     private val systemPrompt = """
         You analyze biographies using Yuri Burlan's System-Vector Psychology. 
@@ -143,56 +176,7 @@ Return only JSON.
             ChatMessage(role = "system", content = systemPrompt),
             ChatMessage(role = "user", content = buildVectorPrompt(bioText))
         )
-        
-        val options = OllamaOptions()
-        
-        // Try /api/chat first
-        val response = try {
-            val httpResponse = client.post("$baseUrl/api/chat") {
-                contentType(ContentType.Application.Json)
-                setBody(OllamaChatRequest(
-                    model = model,
-                    messages = messages,
-                    options = options,
-                    stream = false
-                ))
-                timeout {
-                    requestTimeoutMillis = 600000
-                }
-            }
-            if (!httpResponse.status.isSuccess()) {
-                throw IllegalStateException("Ollama chat failed: ${httpResponse.status}")
-            }
-            val responseType = httpResponse.contentType()?.withoutParameters()
-            if (responseType == ContentType.Application.Json) {
-                httpResponse.body<OllamaChatResponse>()
-            } else {
-                val raw = httpResponse.bodyAsText()
-                OllamaChatResponse(message = ChatMessage(role = "assistant", content = extractChatResponse(raw)))
-            }
-        } catch (e: Exception) {
-            // Fallback to /api/generate
-            val userParts = messages.filter { it.role == "user" }.joinToString("\n\n") { it.content }
-            val prompt = "$systemPrompt\n\n$userParts"
-            
-            val generateResponseText = client.post("$baseUrl/api/generate") {
-                contentType(ContentType.Application.Json)
-                setBody(OllamaGenerateRequest(
-                    model = model,
-                    prompt = prompt,
-                    options = options,
-                    stream = false
-                ))
-                timeout {
-                    requestTimeoutMillis = 600000
-                }
-            }.bodyAsText()
-
-            OllamaChatResponse(response = extractGenerateResponse(generateResponseText))
-        }
-        
-        val content = response.message?.content ?: response.response ?: 
-            throw IllegalStateException("No response from LLM")
+        val content = fetchContent(messages)
         
         return try {
             Json.decodeFromString<TraitResponse>(content)
@@ -202,30 +186,7 @@ Return only JSON.
                 role = "system",
                 content = "Your last output was not valid JSON. Return strict JSON matching the schema only."
             )
-            
-            val retryResponse = client.post("$baseUrl/api/chat") {
-                contentType(ContentType.Application.Json)
-                setBody(OllamaChatRequest(
-                    model = model,
-                    messages = retryMessages,
-                    options = options,
-                    stream = false
-                ))
-                timeout {
-                    requestTimeoutMillis = 600000
-                }
-            }
-            val retryType = retryResponse.contentType()?.withoutParameters()
-            val retryParsed = if (retryType == ContentType.Application.Json) {
-                retryResponse.body<OllamaChatResponse>()
-            } else {
-                val raw = retryResponse.bodyAsText()
-                OllamaChatResponse(message = ChatMessage(role = "assistant", content = extractChatResponse(raw)))
-            }
-            
-            val retryContent = retryParsed.message?.content ?: retryParsed.response ?:
-                throw IllegalStateException("No response from LLM on retry")
-            
+            val retryContent = fetchContent(retryMessages)
             Json.decodeFromString<TraitResponse>(retryContent)
         }
     }
@@ -280,5 +241,120 @@ Return only JSON.
             }
         }
         return builder.toString()
+    }
+
+    private suspend fun fetchContent(messages: List<ChatMessage>): String {
+        val options = OllamaOptions()
+        val errors = mutableListOf<String>()
+
+        suspend fun attempt(label: String, block: suspend () -> String?): String? {
+            return try {
+                val result = block()
+                if (result.isNullOrBlank()) {
+                    errors.add("$label returned empty response")
+                    null
+                } else {
+                    result
+                }
+            } catch (e: Exception) {
+                val message = e.message ?: e.javaClass.simpleName
+                errors.add("$label failed: $message")
+                null
+            }
+        }
+
+        val userParts = messages.filter { it.role == "user" }.joinToString("\n\n") { it.content }
+        val prompt = "$systemPrompt\n\n$userParts"
+
+        return attempt("ollama /api/chat") {
+            val httpResponse = client.post("$baseUrl/api/chat") {
+                contentType(ContentType.Application.Json)
+                setBody(OllamaChatRequest(
+                    model = model,
+                    messages = messages,
+                    options = options,
+                    stream = false
+                ))
+                timeout {
+                    requestTimeoutMillis = 600000
+                }
+            }
+            if (!httpResponse.status.isSuccess()) {
+                throw IllegalStateException("status ${httpResponse.status}")
+            }
+            val responseType = httpResponse.contentType()?.withoutParameters()
+            if (responseType == ContentType.Application.Json) {
+                val parsed = httpResponse.body<OllamaChatResponse>()
+                parsed.message?.content ?: parsed.response
+            } else {
+                val raw = httpResponse.bodyAsText()
+                extractChatResponse(raw)
+            }
+        } ?: attempt("ollama /api/generate") {
+            val httpResponse = client.post("$baseUrl/api/generate") {
+                contentType(ContentType.Application.Json)
+                setBody(OllamaGenerateRequest(
+                    model = model,
+                    prompt = prompt,
+                    options = options,
+                    stream = false
+                ))
+                timeout {
+                    requestTimeoutMillis = 600000
+                }
+            }
+            if (!httpResponse.status.isSuccess()) {
+                throw IllegalStateException("status ${httpResponse.status}")
+            }
+            val generateResponseText = httpResponse.bodyAsText()
+            extractGenerateResponse(generateResponseText)
+        } ?: attempt("openai /v1/chat/completions") {
+            val httpResponse = client.post("$baseUrl/v1/chat/completions") {
+                contentType(ContentType.Application.Json)
+                apiKey?.let { header(HttpHeaders.Authorization, "Bearer $it") }
+                setBody(OpenAiChatRequest(
+                    model = model,
+                    messages = messages.map { OpenAiChatMessage(it.role, it.content) },
+                    temperature = options.temperature,
+                    stream = false
+                ))
+                timeout {
+                    requestTimeoutMillis = 600000
+                }
+            }
+            if (!httpResponse.status.isSuccess()) {
+                throw IllegalStateException("status ${httpResponse.status}")
+            }
+            val responseType = httpResponse.contentType()?.withoutParameters()
+            val parsed = if (responseType == ContentType.Application.Json) {
+                httpResponse.body<OpenAiChatResponse>()
+            } else {
+                Json.decodeFromString<OpenAiChatResponse>(httpResponse.bodyAsText())
+            }
+            parsed.choices.firstOrNull()?.message?.content ?: parsed.choices.firstOrNull()?.text
+        } ?: attempt("openai /v1/completions") {
+            val httpResponse = client.post("$baseUrl/v1/completions") {
+                contentType(ContentType.Application.Json)
+                apiKey?.let { header(HttpHeaders.Authorization, "Bearer $it") }
+                setBody(OpenAiCompletionRequest(
+                    model = model,
+                    prompt = prompt,
+                    temperature = options.temperature
+                ))
+                timeout {
+                    requestTimeoutMillis = 600000
+                }
+            }
+            if (!httpResponse.status.isSuccess()) {
+                throw IllegalStateException("status ${httpResponse.status}")
+            }
+            val responseType = httpResponse.contentType()?.withoutParameters()
+            val parsed = if (responseType == ContentType.Application.Json) {
+                httpResponse.body<OpenAiChatResponse>()
+            } else {
+                Json.decodeFromString<OpenAiChatResponse>(httpResponse.bodyAsText())
+            }
+            parsed.choices.firstOrNull()?.text ?: parsed.choices.firstOrNull()?.message?.content
+        } ?: throw IllegalStateException("No response from LLM. Attempts: ${errors.joinToString("; ")}")
     }
 }
