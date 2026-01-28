@@ -46,6 +46,41 @@ class JsonbColumnType : ColumnType() {
 // Helper for JSONB columns
 fun Table.jsonb(name: String): Column<String> = registerColumn(name, JsonbColumnType())
 
+class VectorColumnType(private val dim: Int) : ColumnType() {
+    override fun sqlType(): String = "vector($dim)"
+
+    override fun valueFromDB(value: Any): Any = when (value) {
+        is PGobject -> value.value ?: ""
+        else -> value.toString()
+    }
+
+    override fun notNullValueToDB(value: Any): Any {
+        return valueToVector(value)
+    }
+
+    override fun setParameter(stmt: PreparedStatementApi, index: Int, value: Any?) {
+        if (value == null) {
+            stmt.setNull(index, this)
+            return
+        }
+
+        stmt[index] = valueToVector(value)
+    }
+
+    private fun valueToVector(value: Any): PGobject {
+        return when (value) {
+            is PGobject -> value
+            else -> PGobject().apply {
+                type = "vector"
+                this.value = value.toString()
+            }
+        }
+    }
+}
+
+// Helper for pgvector columns
+fun Table.vector(name: String, dim: Int): Column<String> = registerColumn(name, VectorColumnType(dim))
+
 object PersonRaw : UUIDTable("person_raw", columnName = "id") {
     val xmlId = text("xml_id").nullable()
     val name = text("name")
@@ -154,7 +189,7 @@ object Embeddings384 : Table("embeddings_384") {
     val personId = uuid("person_id").references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
     val modelName = text("model_name")
     val dim = integer("dim").check { it eq 384 }
-    val vector = text("vector") // pgvector stored as text, will need custom handling
+    val vector = vector("vector", 384)
     val textHash = text("text_hash").nullable()
     val meta = jsonb("meta").nullable()
     val sourceCol = text("source").nullable()
@@ -168,7 +203,7 @@ object Embeddings768 : Table("embeddings_768") {
     val personId = uuid("person_id").references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
     val modelName = text("model_name")
     val dim = integer("dim").check { it eq 768 }
-    val vector = text("vector") // pgvector stored as text, will need custom handling
+    val vector = vector("vector", 768)
     val textHash = text("text_hash").nullable()
     val meta = jsonb("meta").nullable()
     val sourceCol = text("source").nullable()
@@ -182,7 +217,7 @@ object Embeddings1024 : Table("embeddings_1024") {
     val personId = uuid("person_id").references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
     val modelName = text("model_name")
     val dim = integer("dim").check { it eq 1024 }
-    val vector = text("vector") // pgvector stored as text, will need custom handling
+    val vector = vector("vector", 1024)
     val textHash = text("text_hash").nullable()
     val meta = jsonb("meta").nullable()
     val sourceCol = text("source").nullable()
@@ -196,7 +231,7 @@ object Embeddings1536 : Table("embeddings_1536") {
     val personId = uuid("person_id").references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
     val modelName = text("model_name")
     val dim = integer("dim").check { it eq 1536 }
-    val vector = text("vector") // pgvector stored as text, will need custom handling
+    val vector = vector("vector", 1536)
     val textHash = text("text_hash").nullable()
     val meta = jsonb("meta").nullable()
     val sourceCol = text("source").nullable()

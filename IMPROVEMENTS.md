@@ -1,1 +1,6 @@
 High: hardcoded default credentials — docker-compose.yml includes defaults like postgres, minio123, admin. Fine for local dev, risky if reused in production.
+Gaps and coherence risks
+Embeddings schema mismatch: SQL uses vector(...) types in infra/sql/002_embeddings.sql, but Kotlin schema uses text for the same columns in service/core/src/main/kotlin/com/astroreason/core/schema/Tables.kt. This can cause writes to fail or store bad data.
+Incomplete Python → Kotlin migration: Several critical worker services are still Python (service/ingest/, service/worker_embeddings/), while docs imply a migration to Kotlin. This adds operational complexity and makes the “single stack” story inconsistent.
+Astro backend fallback: AstroFeatures.kt includes a Swiss Ephemeris path but regularly falls back to a simplified backend. If Swiss Ephemeris isn’t set up in deployment, astro feature accuracy may diverge from expectations.
+Stats/correlation service: The API exposes correlation endpoints, but there’s no dedicated stats service or batch computation pipeline. This suggests the system might rely on on-demand computation, which may not match performance expectations in docs.

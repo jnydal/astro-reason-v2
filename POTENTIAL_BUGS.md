@@ -1,2 +1,0 @@
-Traits/Ollama issues: The section about TraitScorer and /api/chat fallback/timeouts is still relevant. Traits are currently slow and had chat response issues, so that’s still a real concern.
-Embeddings worker stability: The embeddings worker can still be blocked by long processing if not chunked; you just asked to fix that. So the “stuck” discussion is still relevant in spirit.
