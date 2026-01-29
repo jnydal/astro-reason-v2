@@ -158,6 +158,10 @@ docker compose ps
 docker exec -it <local-llm-container-name> ollama pull qwen2.5:7b-instruct-q4_K_M
 ```
 
+Note: Ollama models are stored in the `ollama` Docker volume. You only need to
+pull the model once unless you remove volumes (for example, `docker compose down -v`
+or deleting the `ollama` volume).
+
 Test:
 
 ```bash

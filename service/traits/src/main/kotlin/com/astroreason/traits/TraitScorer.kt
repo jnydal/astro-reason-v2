@@ -131,6 +131,9 @@ class TraitScorer(
         install(HttpTimeout)
     }
     private val apiKey = System.getenv("OPENAI_API_KEY") ?: System.getenv("LLM_API_KEY")
+    private val trimmedBaseUrl = baseUrl.trimEnd('/')
+    private val ollamaBaseUrl = if (trimmedBaseUrl.endsWith("/api")) trimmedBaseUrl else "$trimmedBaseUrl/api"
+    private val openAiBaseUrl = if (trimmedBaseUrl.endsWith("/v1")) trimmedBaseUrl else "$trimmedBaseUrl/v1"
     
     private val systemPrompt = """
         You analyze biographies using Yuri Burlan's System-Vector Psychology. 
@@ -305,7 +308,7 @@ Return only JSON.
         val prompt = "$systemPrompt\n\n$userParts"
 
         return attempt("ollama /api/chat") {
-            val httpResponse = client.post("$baseUrl/api/chat") {
+            val httpResponse = client.post("$ollamaBaseUrl/chat") {
                 contentType(ContentType.Application.Json)
                 setBody(OllamaChatRequest(
                     model = model,
@@ -329,7 +332,7 @@ Return only JSON.
                 extractChatResponse(raw)
             }
         } ?: attempt("ollama /api/generate") {
-            val httpResponse = client.post("$baseUrl/api/generate") {
+            val httpResponse = client.post("$ollamaBaseUrl/generate") {
                 contentType(ContentType.Application.Json)
                 setBody(OllamaGenerateRequest(
                     model = model,
@@ -347,7 +350,7 @@ Return only JSON.
             val generateResponseText = httpResponse.bodyAsText()
             extractGenerateResponse(generateResponseText)
         } ?: attempt("openai /v1/chat/completions") {
-            val httpResponse = client.post("$baseUrl/v1/chat/completions") {
+            val httpResponse = client.post("$openAiBaseUrl/chat/completions") {
                 contentType(ContentType.Application.Json)
                 apiKey?.let { header(HttpHeaders.Authorization, "Bearer $it") }
                 setBody(OpenAiChatRequest(
@@ -366,7 +369,7 @@ Return only JSON.
             val raw = httpResponse.bodyAsText()
             extractOpenAiResponse(raw)
         } ?: attempt("openai /v1/completions") {
-            val httpResponse = client.post("$baseUrl/v1/completions") {
+            val httpResponse = client.post("$openAiBaseUrl/completions") {
                 contentType(ContentType.Application.Json)
                 apiKey?.let { header(HttpHeaders.Authorization, "Bearer $it") }
                 setBody(OpenAiCompletionRequest(
