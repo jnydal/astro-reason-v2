@@ -68,6 +68,71 @@ def test_compute_features_minimal(monkeypatch):
         assert f"lon_{p}_sin" in fv and f"lon_{p}_cos" in fv
 
 
+def test_compute_features_deterministic_snapshot(monkeypatch):
+    # Force fully deterministic longitudes (all planets at 0° Aries).
+    fake_longs = {p: 0.0 for p in PLANETS}
+
+    import service.astro.app.astro_features as af
+
+    def _fake_sf_longitudes(_dt_utc, _lat, _lon):
+        return fake_longs
+
+    monkeypatch.setattr(af, "skyfield_longitudes", _fake_sf_longitudes)
+
+    row = {
+        "person_id": "00000000-0000-0000-0000-000000000002",
+        "date": dt.date(1984, 6, 12),
+        "time": dt.time(6, 30, 0),
+        "tz_offset_minutes": 60,
+        "lat": 59.91,
+        "lon": 10.75,
+    }
+
+    out = compute_features_for_person(row, backend="skyfield")
+
+    assert out["system"] == "skyfield"
+    assert out["unknown_time"] is False
+    assert out["houses"] is None
+    assert out["longs"] == {p: 0.0 for p in PLANETS}
+
+    # All pairwise aspects become conjunctions with full strength.
+    aspects = out["aspects"]
+    assert len(aspects) == 45  # C(10,2)
+    assert {a["aspect"] for a in aspects} == {"conjunction"}
+    assert all(a["strength"] == 1.0 for a in aspects)
+    assert all(a["deviation"] == 0.0 for a in aspects)
+    assert all(a["angle"] == 0.0 for a in aspects)
+
+    assert out["elem_ratios"] == {"fire": 1.0, "earth": 0.0, "air": 0.0, "water": 0.0}
+    assert out["modality_ratios"] == {"cardinal": 1.0, "fixed": 0.0, "mutable": 0.0}
+
+    expected_fv = {
+        "lon_sun_sin": 0.0, "lon_sun_cos": 1.0,
+        "lon_moon_sin": 0.0, "lon_moon_cos": 1.0,
+        "lon_mercury_sin": 0.0, "lon_mercury_cos": 1.0,
+        "lon_venus_sin": 0.0, "lon_venus_cos": 1.0,
+        "lon_mars_sin": 0.0, "lon_mars_cos": 1.0,
+        "lon_jupiter_sin": 0.0, "lon_jupiter_cos": 1.0,
+        "lon_saturn_sin": 0.0, "lon_saturn_cos": 1.0,
+        "lon_uranus_sin": 0.0, "lon_uranus_cos": 1.0,
+        "lon_neptune_sin": 0.0, "lon_neptune_cos": 1.0,
+        "lon_pluto_sin": 0.0, "lon_pluto_cos": 1.0,
+        "aspect_strength_conjunction": 45.0,
+        "aspect_strength_opposition": 0.0,
+        "aspect_strength_trine": 0.0,
+        "aspect_strength_square": 0.0,
+        "aspect_strength_sextile": 0.0,
+        "elem_fire": 1.0,
+        "elem_earth": 0.0,
+        "elem_air": 0.0,
+        "elem_water": 0.0,
+        "mod_cardinal": 1.0,
+        "mod_fixed": 0.0,
+        "mod_mutable": 0.0,
+    }
+    assert out["feature_vec"] == expected_fv
+
+
 def test_wrap360_and_ang_distance():
     assert wrap360(370.0) == 10.0
     assert wrap360(-10.0) == 350.0
