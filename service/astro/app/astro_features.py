@@ -31,7 +31,6 @@ import numpy as np
 import psycopg2.extras
 
 import os
-from confluent_kafka import Consumer
 
 # ---------------------------
 # Backend selection
@@ -499,6 +498,7 @@ def _consume_loop():
         raise RuntimeError("Install 'pyswisseph' (preferred) or 'skyfield' to compute astro features.")
 
     backend = "swisseph" if _BACKEND == "swisseph" else "skyfield"
+    from confluent_kafka import Consumer
     consumer = Consumer(
         {
             "bootstrap.servers": KAFKA_BOOTSTRAP,
