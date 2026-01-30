@@ -139,7 +139,7 @@ class TraitScorer(
         You analyze biographies using Yuri Burlan's System-Vector Psychology. 
         Score each of the 8 vectors on a 1..7 scale based ONLY on the biography content. 
         If evidence is weak, use 4 and state 'insufficient evidence' in rationale. 
-        Return strict JSON that matches the provided schema. No extra text.
+        Return strict JSON that matches the provided schema. No extra text or markdown code fences.
     """.trimIndent()
     
     fun buildVectorPrompt(bioText: String): String {
@@ -183,15 +183,15 @@ Return only JSON.
         val content = fetchContent(messages)
         
         return try {
-            Json.decodeFromString<TraitResponse>(content)
+            Json.decodeFromString<TraitResponse>(normalizeJsonResponse(content))
         } catch (e: Exception) {
             // Retry with strict JSON instruction
             val retryMessages = messages + ChatMessage(
                 role = "system",
-                content = "Your last output was not valid JSON. Return strict JSON matching the schema only."
+                content = "Your last output was not valid JSON. Return strict JSON matching the schema only, without markdown code fences."
             )
             val retryContent = fetchContent(retryMessages)
-            Json.decodeFromString<TraitResponse>(retryContent)
+            Json.decodeFromString<TraitResponse>(normalizeJsonResponse(retryContent))
         }
     }
     
@@ -200,6 +200,26 @@ Return only JSON.
         val digest = MessageDigest.getInstance("SHA-256")
         val hash = digest.digest(prompt.toByteArray())
         return hash.joinToString("") { "%02x".format(it) }
+    }
+
+    internal fun normalizeJsonResponse(raw: String): String {
+        var trimmed = raw.trim()
+        if (trimmed.startsWith("```")) {
+            val lines = trimmed.lines()
+            val withoutFences = lines
+                .dropWhile { it.trim().startsWith("```") }
+                .dropLastWhile { it.trim().startsWith("```") }
+                .filterNot { it.trim().startsWith("```") }
+            trimmed = withoutFences.joinToString("\n").trim()
+        }
+
+        val start = trimmed.indexOf('{')
+        val end = trimmed.lastIndexOf('}')
+        if (start != -1 && end != -1 && end > start) {
+            trimmed = trimmed.substring(start, end + 1).trim()
+        }
+
+        return trimmed
     }
 
     private fun extractGenerateResponse(raw: String): String? {

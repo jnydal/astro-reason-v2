@@ -6,3 +6,4 @@ skyfield
 jplephem
 python-dateutil
 tzdata
+confluent-kafka

@@ -32,6 +32,8 @@ services:
       PG_DSN: postgresql://postgres:postgres@db:5432/astro_reason
       SE_EPHE_PATH: /opt/ephe
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_GROUP_ID: astro-worker
+      KAFKA_ASTRO_TOPIC: astro
     depends_on:
       db:    { condition: service_healthy }
       kafka: { condition: service_healthy }

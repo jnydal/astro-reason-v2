@@ -1,6 +1,16 @@
 High: hardcoded default credentials — docker-compose.yml includes defaults like postgres, minio123, admin. Fine for local dev, risky if reused in production.
 Gaps and coherence risks
-Embeddings schema mismatch: SQL uses vector(...) types in infra/sql/002_embeddings.sql, but Kotlin schema uses text for the same columns in service/core/src/main/kotlin/com/astroreason/core/schema/Tables.kt. This can cause writes to fail or store bad data.
-Incomplete Python → Kotlin migration: Several critical worker services are still Python (service/ingest/, service/worker_embeddings/), while docs imply a migration to Kotlin. This adds operational complexity and makes the “single stack” story inconsistent.
-Astro backend fallback: AstroFeatures.kt includes a Swiss Ephemeris path but regularly falls back to a simplified backend. If Swiss Ephemeris isn’t set up in deployment, astro feature accuracy may diverge from expectations.
 Stats/correlation service: The API exposes correlation endpoints, but there’s no dedicated stats service or batch computation pipeline. This suggests the system might rely on on-demand computation, which may not match performance expectations in docs.
+
+
+
+Not fully coherent yet. The astro features pipeline works, but there are integration gaps that make it inconsistent with the rest of the system.
+Key issues:
+Processing model is inconsistent: Astro uses DB polling loops while other services use queues and job status tracking.
+Backend differences: Python uses Swiss Ephemeris → Skyfield fallback; this can yield different results if ephemeris data is missing.
+Config/logging inconsistencies: Environment var naming and logging/provenance behavior should be standardized.
+Net: setup is partially correct but not coherent with the rest of the system. The main risk is operational inconsistency (no job tracking) and silent backend shifts.
+If you want, I can:
+Standardize the feature computation inputs/outputs and document feature vector keys,
+Add job status tracking or move astro processing onto the same worker/queue pattern,
+Add a consistency test that verifies deterministic outputs for a fixed birth record.

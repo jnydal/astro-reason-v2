@@ -8,7 +8,6 @@ import aws.smithy.kotlin.runtime.content.writeToFile
 import aws.smithy.kotlin.runtime.net.url.Url
 import com.astroreason.core.*
 import com.astroreason.core.schema.*
-import com.astroreason.core.queue.JobQueue
 import com.astroreason.core.queue.createJobQueue
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.exposed.sql.*
@@ -28,6 +27,13 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
     val source = meta["source"] ?: "astrodb-upload"
     
     val settings = Config.settings
+    val astroTopic = System.getenv("KAFKA_ASTRO_TOPIC") ?: "astro"
+    val astroQueue = createJobQueue(
+        settings.kafkaBootstrapServers,
+        astroTopic,
+        groupId = null,
+        clientId = "worker-ingest"
+    )
     val s3Client = S3Client {
         settings.s3Endpoint?.let { endpointUrl = Url.parse(it) }
         forcePathStyle = true
@@ -53,6 +59,7 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
     try {
         val parser = XmlParser()
         val touchedPids = mutableSetOf<UUID>()
+        val astroPids = mutableSetOf<UUID>()
         var recordsSeen = 0
         
         transaction(DatabaseManager.getDatabase()) {
@@ -141,7 +148,7 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
                 touchedPids.add(personId)
                 
                 // Birth data
-                birthBatch.add(personId to BirthData(
+                val birthData = BirthData(
                     personId = personId,
                     date = parseLocalDate(rec.date),
                     time = parseLocalTime(rec.time),
@@ -150,7 +157,11 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
                     lat = rec.lat,
                     lon = rec.lon,
                     dataQuality = rec.rating
-                ))
+                )
+                birthBatch.add(personId to birthData)
+                if (birthData.date != null) {
+                    astroPids.add(personId)
+                }
                 
                 // Bio text
                 if (!rec.bioText.isNullOrBlank()) {
@@ -176,13 +187,27 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
         
         // Note: semantic embeddings are now triggered after wiki enrichment
         // from the fetch-bio service, to ensure they run on full biographies.
+        if (astroPids.isNotEmpty()) {
+            for (personId in astroPids) {
+                astroQueue.enqueue(
+                    function = "astro.compute_features",
+                    personId.toString(),
+                    kwargs = mapOf("source" to source)
+                )
+            }
+        }
+
         println("✅ Parsed $recordsSeen records, upserted ${touchedPids.size} people")
         logProvenanceEvent(
             stage = "ingest",
             status = "ok",
             count = touchedPids.size,
             durationMs = (System.nanoTime() - startedAt) / 1_000_000,
-            meta = mapOf("source" to source, "object_uri" to objectUri)
+            meta = mapOf(
+                "source" to source,
+                "object_uri" to objectUri,
+                "astro_jobs" to astroPids.size.toString()
+            )
         )
         
     } catch (e: Exception) {

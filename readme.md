@@ -59,8 +59,8 @@ After wiki enrichment, the `fetch-bio` service enqueues batched jobs on the `emb
 Yuri Burlan scoring (traits) – topic: `traits`:
 The traits worker is implemented (Kotlin + local LLM) and listens on the `traits` Kafka topic; after wiki enrichment, `fetch-bio` enqueues `"traits.score_person"` jobs for each enriched person, and the worker reads biography text from `bio_text` and writes 8‑vector traits into `nlp_vectors`.
 
-Astrological encoding / astro features:
-The astro service (no queue; DB polling) scans for births without `astro_features`, computes ephemeris‑based features (currently via a fallback backend, with Swiss Ephemeris JNI planned) and stores structured astro features + a flat numeric feature vector in `astro_features`.
+Astrological encoding / astro features – topic: `astro`:
+The astro worker consumes `"astro.compute_features"` jobs from Kafka, computes ephemeris‑based features (Swiss Ephemeris with Skyfield fallback) and stores structured astro features + a flat numeric feature vector in `astro_features`.
 
 Storage & analysis:
 All along, PostgreSQL is the source of truth for people, births, bios, traits, embeddings, and astro features. Kafka is used as the job queue between steps (`default` → ingest, `embeddings` for semantic vectors after wiki enrichment, `traits` for Burlan scoring). From there you can query/visualize/analyze whenever you like.

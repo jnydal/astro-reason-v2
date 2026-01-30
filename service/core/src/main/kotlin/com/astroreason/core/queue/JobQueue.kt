@@ -77,6 +77,10 @@ class JobQueue(
             props[ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG] = false
             props[ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
             props[ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
+            val maxPollIntervalMs = System.getenv("KAFKA_MAX_POLL_INTERVAL_MS")?.toIntOrNull() ?: 900000
+            val maxPollRecords = System.getenv("KAFKA_MAX_POLL_RECORDS")?.toIntOrNull() ?: 1
+            props[ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG] = maxPollIntervalMs
+            props[ConsumerConfig.MAX_POLL_RECORDS_CONFIG] = maxPollRecords
             KafkaConsumer<String, String>(props).apply {
                 subscribe(listOf(queueName))
             }

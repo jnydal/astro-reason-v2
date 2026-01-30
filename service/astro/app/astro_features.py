@@ -16,10 +16,11 @@ Priority backend: pyswisseph (Swiss Ephemeris).
 Fallback: skyfield (longitudes only; houses skipped).
 
 Run:
-    python -m app.workers.astro_features
+    python -m service.astro.app.astro_features
 """
 from __future__ import annotations
 
+import json
 import math
 import time
 from dataclasses import dataclass
@@ -30,6 +31,7 @@ import numpy as np
 import psycopg2.extras
 
 import os
+from confluent_kafka import Consumer
 
 # ---------------------------
 # Backend selection
@@ -394,87 +396,165 @@ def _birth_has_tz_offset(cur) -> bool:
     return cur.fetchone() is not None
 
 
-def run(batch_size: int = 128) -> int:
-    """
-    Process births that don't yet have astro_features.
-    Returns number of rows written.
-    """
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+KAFKA_GROUP_ID = os.getenv("KAFKA_GROUP_ID", "astro-worker")
+KAFKA_TOPIC = os.getenv("KAFKA_ASTRO_TOPIC", "astro")
+
+
+def _update_job_status(job_id: str, status: str, result: str | None = None, exc_info: str | None = None) -> None:
+    from service.core.db import get_conn
+
+    if not job_id:
+        return
+    conn = get_conn()
+    cur = conn.cursor()
+    now_ms = int(time.time() * 1000)
+    cur.execute(
+        """
+        UPDATE job_status
+           SET status = %s,
+               started_at = COALESCE(started_at, %s),
+               ended_at = CASE WHEN %s IN ('FINISHED', 'FAILED') THEN %s ELSE ended_at END,
+               result = %s,
+               exc_info = %s,
+               updated_at = NOW()
+         WHERE id = %s
+        """,
+        (status, now_ms, status, now_ms, result, exc_info, job_id),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def _load_birth_row(cur, person_id: str):
+    tz_offset_expr = "b.tz_offset_minutes" if _birth_has_tz_offset(cur) else "NULL::int"
+    cur.execute(
+        f"""
+        SELECT b.person_id, b.date, b.time, {tz_offset_expr} AS tz_offset_minutes, b.lat, b.lon
+        FROM birth b
+        WHERE b.person_id = %s
+        """,
+        (person_id,),
+    )
+    return cur.fetchone()
+
+
+def _compute_and_store(cur, row, backend: str) -> None:
+    feats = compute_features_for_person(row, backend=backend)
+    cur.execute(
+        """
+        INSERT INTO astro_features
+            (person_id, system, jd_utc, unknown_time, longs, houses, aspects, elem_ratios, modality_ratios, feature_vec)
+        VALUES (%s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb)
+        ON CONFLICT (person_id) DO UPDATE
+          SET system=EXCLUDED.system,
+              jd_utc=EXCLUDED.jd_utc,
+              unknown_time=EXCLUDED.unknown_time,
+              longs=EXCLUDED.longs,
+              houses=EXCLUDED.houses,
+              aspects=EXCLUDED.aspects,
+              elem_ratios=EXCLUDED.elem_ratios,
+              modality_ratios=EXCLUDED.modality_ratios,
+              feature_vec=EXCLUDED.feature_vec
+        """,
+        (
+            row["person_id"],
+            feats["system"],
+            feats["jd_utc"],
+            feats["unknown_time"],
+            psycopg2.extras.Json(feats["longs"]),
+            psycopg2.extras.Json(feats["houses"]) if feats["houses"] is not None else None,
+            psycopg2.extras.Json(feats["aspects"]),
+            psycopg2.extras.Json(feats["elem_ratios"]),
+            psycopg2.extras.Json(feats["modality_ratios"]),
+            psycopg2.extras.Json(feats["feature_vec"]),
+        ),
+    )
+
+
+def _extract_person_ids(job: dict) -> list[str]:
+    args = job.get("args") or []
+    kwargs = job.get("kwargs") or {}
+    person_ids: list[str] = []
+
+    if args:
+        person_ids.extend([str(pid) for pid in args])
+
+    if not person_ids:
+        raw = kwargs.get("person_ids")
+        if isinstance(raw, list):
+            person_ids.extend([str(pid) for pid in raw])
+        elif isinstance(raw, str):
+            person_ids.append(raw)
+        else:
+            pid = kwargs.get("person_id")
+            if isinstance(pid, str):
+                person_ids.append(pid)
+    return person_ids
+
+
+def _consume_loop():
     if _BACKEND is None:
         raise RuntimeError("Install 'pyswisseph' (preferred) or 'skyfield' to compute astro features.")
 
     backend = "swisseph" if _BACKEND == "swisseph" else "skyfield"
+    consumer = Consumer(
+        {
+            "bootstrap.servers": KAFKA_BOOTSTRAP,
+            "group.id": KAFKA_GROUP_ID,
+            "auto.offset.reset": "earliest",
+        }
+    )
+    consumer.subscribe([KAFKA_TOPIC])
 
+    print(f"Astro worker listening on Kafka topic '{KAFKA_TOPIC}'...")
     from service.core.db import pg_conn, pg_cursor
 
-    with pg_conn() as conn, pg_cursor(conn) as cur:
-        # Find work
-        tz_offset_expr = "b.tz_offset_minutes" if _birth_has_tz_offset(cur) else "NULL::int"
-        cur.execute(f"""
-            SELECT b.person_id, b.date, b.time, {tz_offset_expr} AS tz_offset_minutes, b.lat, b.lon
-            FROM birth b
-            LEFT JOIN astro_features af ON af.person_id = b.person_id
-            WHERE af.person_id IS NULL
-            LIMIT %s
-        """, (batch_size,))
-        rows = cur.fetchall()
+    try:
+        while True:
+            msg = consumer.poll(1.0)
+            if msg is None:
+                continue
+            if msg.error():
+                print(f"Kafka error: {msg.error()}")
+                continue
 
-        if not rows:
-            print("No people pending astro feature computation.")
-            return 0
-
-        wrote = 0
-        for r in rows:
+            job_id = None
             try:
-                feats = compute_features_for_person(r, backend=backend)
-                cur.execute("""
-                    INSERT INTO astro_features
-                        (person_id, system, jd_utc, unknown_time, longs, houses, aspects, elem_ratios, modality_ratios, feature_vec)
-                    VALUES (%s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb)
-                    ON CONFLICT (person_id) DO UPDATE
-                      SET system=EXCLUDED.system,
-                          jd_utc=EXCLUDED.jd_utc,
-                          unknown_time=EXCLUDED.unknown_time,
-                          longs=EXCLUDED.longs,
-                          houses=EXCLUDED.houses,
-                          aspects=EXCLUDED.aspects,
-                          elem_ratios=EXCLUDED.elem_ratios,
-                          modality_ratios=EXCLUDED.modality_ratios,
-                          feature_vec=EXCLUDED.feature_vec
-                """, (
-                    r["person_id"], feats["system"], feats["jd_utc"], feats["unknown_time"],
-                    psycopg2.extras.Json(feats["longs"]),
-                    psycopg2.extras.Json(feats["houses"]) if feats["houses"] is not None else None,
-                    psycopg2.extras.Json(feats["aspects"]),
-                    psycopg2.extras.Json(feats["elem_ratios"]),
-                    psycopg2.extras.Json(feats["modality_ratios"]),
-                    psycopg2.extras.Json(feats["feature_vec"])
-                ))
-                wrote += 1
-            except Exception as e:
-                # You can add provenance logging here if you have a helper
-                print(f"[astro_features] Error person_id={r['person_id']}: {e}")
+                payload = json.loads(msg.value().decode("utf-8"))
+                job_id = payload.get("id")
+                function = payload.get("function")
+                if function and function != "astro.compute_features":
+                    raise ValueError(f"Unknown job function: {function}")
 
-        print(f"✅ astro_features: wrote {wrote} rows using backend={backend}")
-        return wrote
+                person_ids = _extract_person_ids(payload)
+                if not person_ids:
+                    raise ValueError("No person_ids provided")
 
+                _update_job_status(job_id, "STARTED")
+                wrote = 0
+                skipped = 0
 
-def run_forever():
-    """
-    Continuous worker loop with backoff when idle.
-    """
-    batch_size = int(os.getenv("ASTRO_BATCH_SIZE", "128"))
-    idle_sleep = float(os.getenv("ASTRO_IDLE_SLEEP_SECONDS", "2"))
-    max_idle_sleep = float(os.getenv("ASTRO_MAX_IDLE_SLEEP_SECONDS", "30"))
+                with pg_conn() as conn, pg_cursor(conn) as cur:
+                    for person_id in person_ids:
+                        row = _load_birth_row(cur, person_id)
+                        if not row or row["date"] is None:
+                            skipped += 1
+                            continue
+                        _compute_and_store(cur, row, backend=backend)
+                        wrote += 1
 
-    sleep_seconds = idle_sleep
-    while True:
-        wrote = run(batch_size=batch_size)
-        if wrote > 0:
-            sleep_seconds = idle_sleep
-            continue
-        time.sleep(sleep_seconds)
-        sleep_seconds = min(sleep_seconds * 2, max_idle_sleep)
+                result = {"status": "ok", "count": wrote, "skipped": skipped}
+                _update_job_status(job_id, "FINISHED", result=json.dumps(result))
+                print(f"✅ astro_features: wrote {wrote} (skipped {skipped}) backend={backend}")
+            except Exception as exc:
+                if job_id:
+                    _update_job_status(job_id, "FAILED", exc_info=str(exc))
+                print(f"Astro job failed: {exc}")
+    finally:
+        consumer.close()
 
 
 if __name__ == "__main__":
-    run_forever()
+    _consume_loop()

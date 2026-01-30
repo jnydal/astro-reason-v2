@@ -57,7 +57,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
    ├─→ Calls → Ollama LLM (HTTP)
    └─→ Writes → PostgreSQL (nlp_vectors)
 
-6. Astro Service (Kotlin)
+6. Astro Service (Python)
    ├─→ Processes birth data
    ├─→ Computes astrological features
    └─→ Writes → PostgreSQL (astro_features)
@@ -75,7 +75,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - **Kafka**: Spring Kafka
 
 ### Python Services
-- **Framework**: FastAPI (fetch-bio), Kafka consumer (embeddings)
+- **Framework**: FastAPI (fetch-bio), batch worker (astro), Kafka consumer (embeddings)
 - **ML**: sentence-transformers (embeddings)
 - **Database**: psycopg2
 
@@ -185,16 +185,16 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 
 ### 7. Astro Service (`service/astro`)
 
-**Technology**: Kotlin  
-**Mode**: Batch processing  
+**Technology**: Python  
+**Mode**: Kafka worker (topic: `astro`)  
 **Responsibilities**:
 - Compute astrological features from birth data
 - Calculate planetary positions, aspects, elements
 - Generate numeric feature vectors
 
 **Backends**:
-- Swiss Ephemeris (JNI - pending full implementation)
-- Fallback implementation (currently active)
+- Swiss Ephemeris (preferred)
+- Skyfield fallback (if ephemeris data missing)
 
 **Dependencies**: Database
 
@@ -225,7 +225,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
    [Manual trigger or polling] → Traits Worker → Ollama → PostgreSQL
    
 7. Compute Astro Features
-   Astro Service → PostgreSQL
+   Kafka Topic (astro) → Astro Worker → PostgreSQL
 ```
 
 ### Database Schema

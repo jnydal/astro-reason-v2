@@ -72,6 +72,7 @@ services:
       PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
       KAFKA_GROUP_ID: ${KAFKA_INGEST_GROUP_ID:-worker-ingest}
+      KAFKA_ASTRO_TOPIC: ${KAFKA_ASTRO_TOPIC:-astro}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minio}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minio123}
@@ -131,6 +132,9 @@ services:
     environment:
       PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
       SWEPH_EPHE_PATH: ${SWEPH_EPHE_PATH:-/opt/ephe}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      KAFKA_GROUP_ID: ${KAFKA_ASTRO_GROUP_ID:-astro-worker}
+      KAFKA_ASTRO_TOPIC: ${KAFKA_ASTRO_TOPIC:-astro}
     depends_on:
       db:
         condition: service_healthy
