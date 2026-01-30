@@ -31,68 +31,97 @@ fun main() {
     )
     
     val running = AtomicBoolean(true)
+    val processingJob = AtomicBoolean(false)
     Runtime.getRuntime().addShutdownHook(Thread {
         running.set(false)
-        println("Shutdown signal received, stopping trait worker...")
+        println("Shutdown signal received, waiting for in-flight job...")
+        var waitCount = 0
+        while (processingJob.get() && waitCount < 30) {
+            Thread.sleep(1000)
+            waitCount++
+        }
+        if (processingJob.get()) {
+            println("Warning: In-flight job did not complete within 30 seconds")
+        }
+        scorer.close()
+        println("Trait worker stopped")
     })
 
     println("Trait worker started, listening for jobs...")
     var idleBackoffMs = 100L
     
     while (running.get()) {
-        val envelope = jobQueue.dequeue()
-        if (envelope != null) {
-            idleBackoffMs = 100L
-            val job = envelope.job
-            try {
-                val startedAt = System.nanoTime()
-                jobQueue.updateStatus(job.id, JobStatus.STARTED)
-                
-                when (job.function) {
-                    "traits.score_person" -> {
-                        val personIdStr = job.args.firstOrNull()
-                            ?: throw IllegalArgumentException("Missing person_id")
-                        val personId = UUID.fromString(personIdStr)
-                        
-                        runBlocking {
-                            scorePersonTraits(personId, scorer)
+        try {
+            val envelope = jobQueue.dequeue()
+            if (envelope != null) {
+                idleBackoffMs = 100L
+                val job = envelope.job
+                processingJob.set(true)
+                try {
+                    val startedAt = System.nanoTime()
+                    jobQueue.updateStatus(job.id, JobStatus.STARTED)
+                    
+                    when (job.function) {
+                        "traits.score_person" -> {
+                            val personIdStr = job.args.firstOrNull()
+                                ?: throw IllegalArgumentException("Missing person_id")
+                            val personId = UUID.fromString(personIdStr)
+                            
+                            runBlocking {
+                                scorePersonTraits(personId, scorer)
+                            }
+                            
+                            jobQueue.updateStatus(job.id, JobStatus.FINISHED, result = "Success")
+                            logProvenanceEvent(
+                                personId = personId,
+                                stage = "traits",
+                                status = "ok",
+                                count = 1,
+                                durationMs = (System.nanoTime() - startedAt) / 1_000_000,
+                                meta = mapOf("job_id" to job.id)
+                            )
                         }
-                        
-                        jobQueue.updateStatus(job.id, JobStatus.FINISHED, result = "Success")
-                        logProvenanceEvent(
-                            personId = personId,
-                            stage = "traits",
-                            status = "ok",
-                            count = 1,
-                            durationMs = (System.nanoTime() - startedAt) / 1_000_000,
-                            meta = mapOf("job_id" to job.id)
-                        )
+                        else -> {
+                            throw IllegalArgumentException("Unknown function: ${job.function}")
+                        }
                     }
-                    else -> {
-                        throw IllegalArgumentException("Unknown function: ${job.function}")
-                    }
+                } catch (e: Exception) {
+                    jobQueue.updateStatus(
+                        job.id,
+                        JobStatus.FAILED,
+                        excInfo = e.message
+                    )
+                    logProvenanceEvent(
+                        stage = "traits",
+                        status = "error",
+                        error = e.message ?: "unknown_error",
+                        meta = mapOf("job_id" to job.id)
+                    )
+                    e.printStackTrace()
+                } finally {
+                    processingJob.set(false)
+                    jobQueue.ack(envelope)
                 }
-            } catch (e: Exception) {
-                jobQueue.updateStatus(
-                    job.id,
-                    JobStatus.FAILED,
-                    excInfo = e.message
-                )
-                logProvenanceEvent(
-                    stage = "traits",
-                    status = "error",
-                    error = e.message ?: "unknown_error",
-                    meta = mapOf("job_id" to job.id)
-                )
-                e.printStackTrace()
-            } finally {
-                jobQueue.ack(envelope)
+            } else {
+                Thread.sleep(idleBackoffMs)
+                idleBackoffMs = (idleBackoffMs * 2).coerceAtMost(2_000L)
             }
-        } else {
-            Thread.sleep(idleBackoffMs)
-            idleBackoffMs = (idleBackoffMs * 2).coerceAtMost(2_000L)
+        } catch (e: Exception) {
+            processingJob.set(false)
+            if (isKafkaError(e)) {
+                println("Kafka error: ${e.message}")
+            } else {
+                println("Unexpected error in main loop: ${e.message}")
+            }
+            e.printStackTrace()
+            Thread.sleep(5000)
+            idleBackoffMs = 100L
         }
     }
+}
+
+private fun isKafkaError(e: Exception): Boolean {
+    return e.javaClass.name.startsWith("org.apache.kafka.")
 }
 
 suspend fun scorePersonTraits(personId: UUID, scorer: TraitScorer) {

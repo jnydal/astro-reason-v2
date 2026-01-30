@@ -11,6 +11,7 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -134,6 +135,10 @@ class TraitScorer(
     private val trimmedBaseUrl = baseUrl.trimEnd('/')
     private val ollamaBaseUrl = if (trimmedBaseUrl.endsWith("/api")) trimmedBaseUrl else "$trimmedBaseUrl/api"
     private val openAiBaseUrl = if (trimmedBaseUrl.endsWith("/v1")) trimmedBaseUrl else "$trimmedBaseUrl/v1"
+
+    fun close() {
+        client.close()
+    }
     
     private val systemPrompt = """
         You analyze biographies using Yuri Burlan's System-Vector Psychology. 
@@ -307,21 +312,34 @@ Return only JSON.
     private suspend fun fetchContent(messages: List<ChatMessage>): String {
         val options = OllamaOptions()
         val errors = mutableListOf<String>()
+        val maxRetries = 3
+        val baseDelayMs = 1000L
 
         suspend fun attempt(label: String, block: suspend () -> String?): String? {
-            return try {
-                val result = block()
-                if (result.isNullOrBlank()) {
-                    errors.add("$label returned empty response")
-                    null
-                } else {
-                    result
+            var lastError: Exception? = null
+            for (attempt in 1..maxRetries) {
+                try {
+                    val result = block()
+                    if (result.isNullOrBlank()) {
+                        if (attempt < maxRetries) {
+                            delay(baseDelayMs * attempt)
+                            continue
+                        }
+                        errors.add("$label returned empty response after $maxRetries attempts")
+                        return null
+                    }
+                    return result
+                } catch (e: Exception) {
+                    lastError = e
+                    if (attempt < maxRetries && isRetryableError(e)) {
+                        delay(baseDelayMs * attempt)
+                        continue
+                    }
                 }
-            } catch (e: Exception) {
-                val message = e.message ?: e.javaClass.simpleName
-                errors.add("$label failed: $message")
-                null
             }
+            val message = lastError?.message ?: lastError?.javaClass?.simpleName ?: "unknown_error"
+            errors.add("$label failed after $maxRetries attempts: $message")
+            return null
         }
 
         val userParts = messages.filter { it.role == "user" }.joinToString("\n\n") { it.content }
@@ -337,7 +355,9 @@ Return only JSON.
                     stream = false
                 ))
                 timeout {
-                    requestTimeoutMillis = 600000
+                    requestTimeoutMillis = 180000
+                    connectTimeoutMillis = 30000
+                    socketTimeoutMillis = 180000
                 }
             }
             if (!httpResponse.status.isSuccess()) {
@@ -361,7 +381,9 @@ Return only JSON.
                     stream = false
                 ))
                 timeout {
-                    requestTimeoutMillis = 600000
+                    requestTimeoutMillis = 180000
+                    connectTimeoutMillis = 30000
+                    socketTimeoutMillis = 180000
                 }
             }
             if (!httpResponse.status.isSuccess()) {
@@ -380,7 +402,9 @@ Return only JSON.
                     stream = false
                 ))
                 timeout {
-                    requestTimeoutMillis = 600000
+                    requestTimeoutMillis = 180000
+                    connectTimeoutMillis = 30000
+                    socketTimeoutMillis = 180000
                 }
             }
             if (!httpResponse.status.isSuccess()) {
@@ -398,7 +422,9 @@ Return only JSON.
                     temperature = options.temperature
                 ))
                 timeout {
-                    requestTimeoutMillis = 600000
+                    requestTimeoutMillis = 180000
+                    connectTimeoutMillis = 30000
+                    socketTimeoutMillis = 180000
                 }
             }
             if (!httpResponse.status.isSuccess()) {
@@ -407,5 +433,15 @@ Return only JSON.
             val raw = httpResponse.bodyAsText()
             extractOpenAiResponse(raw)
         } ?: throw IllegalStateException("No response from LLM. Attempts: ${errors.joinToString("; ")}")
+    }
+
+    private fun isRetryableError(e: Exception): Boolean {
+        return when (e) {
+            is java.net.ConnectException,
+            is java.net.SocketTimeoutException,
+            is io.ktor.client.network.sockets.ConnectTimeoutException,
+            is io.ktor.client.network.sockets.SocketTimeoutException -> true
+            else -> false
+        }
     }
 }
