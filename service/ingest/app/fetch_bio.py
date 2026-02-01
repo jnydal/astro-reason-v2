@@ -152,8 +152,8 @@ def run(dsn, lang="en", limit=500):
         float(os.getenv("WIKIPEDIA_JITTER_SEC", "0.2")),
     )
 
-    cur.execute(
-        """
+    # Use limit only when explicitly set and > 0; otherwise process all eligible people.
+    base_query = """
         SELECT
             pr.id AS person_id,
             COALESCE(el.qid, bt.qid) AS qid,
@@ -172,14 +172,14 @@ def run(dsn, lang="en", limit=500):
         WHERE COALESCE(el.qid, bt.qid) IS NOT NULL
           AND NOT EXISTS (
             SELECT 1
-            FROM bio_text b2
-            WHERE b2.person_id = pr.id
-              AND b2.source LIKE 'fetch_bio:%%'
+            FROM nlp_vectors nv
+            WHERE nv.person_id = pr.id
         )
-        LIMIT %s
-        """,
-        (limit,),
-    )
+    """
+    if limit and int(limit) > 0:
+        cur.execute(base_query + " LIMIT %s", (int(limit),))
+    else:
+        cur.execute(base_query)
     rows = cur.fetchall()
 
     wrote = 0
