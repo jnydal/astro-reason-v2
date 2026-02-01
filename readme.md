@@ -144,6 +144,7 @@ The pipeline expects the `traits` and `embeddings` topics to exist. Create them 
 ```bash
 docker compose exec -T kafka rpk topic create traits
 docker compose exec -T kafka rpk topic create embeddings
+docker compose exec -T kafka rpk topic create astro
 ```
 
 Verify:
