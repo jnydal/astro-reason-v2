@@ -57,6 +57,7 @@ services:
       KAFKA_GROUP_ID: ${KAFKA_TRAITS_GROUP_ID:-traits-worker}
       OLLAMA_URL: ${OLLAMA_URL:-http://local-llm:11434}
       LLM_MODEL: ${LLM_MODEL:-qwen2.5:7b-instruct-q4_K_M}
+      KAFKA_MAX_POLL_INTERVAL_MS: ${KAFKA_MAX_POLL_INTERVAL_MS:-3600000}
     depends_on:
       db:        { condition: service_healthy }
       kafka:     { condition: service_healthy }

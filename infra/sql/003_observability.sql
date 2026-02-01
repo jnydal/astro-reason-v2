@@ -59,3 +59,31 @@ LEFT JOIN astro_features af ON af.person_id = pr.id
 WHERE ple.last_event_at IS NOT NULL
   AND ple.last_event_at < NOW() - INTERVAL '24 hours'
   AND (nv.person_id IS NULL OR emb.person_id IS NULL OR af.person_id IS NULL);
+
+CREATE OR REPLACE VIEW service_error_events AS
+SELECT
+  created_at,
+  stage,
+  CASE
+    WHEN stage IN ('ingest', 'ingest_job') THEN 'ingest'
+    WHEN stage IN ('fetch_bio') THEN 'fetch_bio'
+    WHEN stage IN ('resolve_qid') THEN 'resolver'
+    WHEN stage IN ('traits') THEN 'traits'
+    WHEN stage IN ('embeddings') THEN 'embeddings'
+    WHEN stage IN ('astro') THEN 'astro'
+    ELSE stage
+  END AS service,
+  COALESCE(detail->>'status', 'unknown') AS status,
+  detail->>'error' AS error,
+  detail->'meta' AS meta,
+  detail AS detail
+FROM provenance_event
+WHERE COALESCE(detail->>'status', 'unknown') IN ('error', 'failed', 'fail');
+
+CREATE OR REPLACE VIEW service_error_daily AS
+SELECT
+  date_trunc('day', created_at) AS day,
+  service,
+  COUNT(*) AS errors
+FROM service_error_events
+GROUP BY 1, 2;

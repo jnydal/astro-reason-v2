@@ -6,6 +6,7 @@ import kotlinx.serialization.json.Json
 import com.astroreason.core.DatabaseManager
 import com.astroreason.core.schema.JobStatusTable
 import kotlinx.serialization.decodeFromString
+import org.apache.kafka.clients.consumer.CommitFailedException
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.clients.consumer.OffsetAndMetadata
@@ -77,7 +78,7 @@ class JobQueue(
             props[ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG] = false
             props[ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
             props[ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
-            val maxPollIntervalMs = System.getenv("KAFKA_MAX_POLL_INTERVAL_MS")?.toIntOrNull() ?: 900000
+            val maxPollIntervalMs = System.getenv("KAFKA_MAX_POLL_INTERVAL_MS")?.toIntOrNull() ?: 3_600_000
             val maxPollRecords = System.getenv("KAFKA_MAX_POLL_RECORDS")?.toIntOrNull() ?: 1
             props[ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG] = maxPollIntervalMs
             props[ConsumerConfig.MAX_POLL_RECORDS_CONFIG] = maxPollRecords
@@ -154,9 +155,13 @@ class JobQueue(
     fun ack(envelope: JobEnvelope) {
         val kafkaConsumer = consumer ?: return
         val topicPartition = TopicPartition(envelope.topic, envelope.partition)
-        kafkaConsumer.commitSync(
-            mapOf(topicPartition to OffsetAndMetadata(envelope.offset + 1))
-        )
+        try {
+            kafkaConsumer.commitSync(
+                mapOf(topicPartition to OffsetAndMetadata(envelope.offset + 1))
+            )
+        } catch (e: CommitFailedException) {
+            println("Kafka commit failed (consumer likely rebalanced): ${e.message}")
+        }
     }
 
     fun updateStatus(jobId: String, status: JobStatus, result: String? = null, excInfo: String? = null) {
