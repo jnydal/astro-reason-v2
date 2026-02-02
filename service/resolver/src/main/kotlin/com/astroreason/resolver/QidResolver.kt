@@ -18,6 +18,8 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import java.time.Instant
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.io.File
@@ -169,7 +171,13 @@ class QidResolver {
                 }
         }
 
-        val resolved = mutableListOf<Pair<UUID, String>>()
+        data class ResolvedQid(
+            val personId: UUID,
+            val qid: String,
+            val candidates: List<WikidataItem>
+        )
+
+        val resolved = mutableListOf<ResolvedQid>()
 
         for (person in pending) {
             var candidates = searchQid(normalizeName(person.fullName))
@@ -192,20 +200,42 @@ class QidResolver {
             }
 
             if (qid != null) {
-                resolved.add(person.personId to qid)
+                resolved.add(
+                    ResolvedQid(
+                        personId = person.personId,
+                        qid = qid,
+                        candidates = candidates.take(10)
+                    )
+                )
             }
         }
 
         if (resolved.isNotEmpty()) {
             transaction(DatabaseManager.getDatabase()) {
-                for ((personId, qid) in resolved) {
+                for (item in resolved) {
+                    val candidatesJson = Json.encodeToString(item.candidates)
                     BioText.insertIgnore {
-                        it[BioText.personId] = personId
+                        it[BioText.personId] = item.personId
                         it[BioText.revId] = 0L
-                        it[BioText.qid] = qid
+                        it[BioText.qid] = item.qid
                     }
-                    BioText.update({ (BioText.personId eq personId) and (BioText.revId eq 0L) }) {
-                        it[BioText.qid] = qid
+                    BioText.update({ (BioText.personId eq item.personId) and (BioText.revId eq 0L) }) {
+                        it[BioText.qid] = item.qid
+                    }
+                    EntityLink.insertIgnore {
+                        it[EntityLink.id] = item.personId
+                        it[EntityLink.qid] = item.qid
+                        it[EntityLink.method] = "resolver"
+                        it[EntityLink.score] = null
+                        it[EntityLink.candidatesJson] = candidatesJson
+                        it[EntityLink.decidedAt] = Instant.now()
+                    }
+                    EntityLink.update({ EntityLink.id eq item.personId }) {
+                        it[EntityLink.qid] = item.qid
+                        it[EntityLink.method] = "resolver"
+                        it[EntityLink.score] = null
+                        it[EntityLink.candidatesJson] = candidatesJson
+                        it[EntityLink.decidedAt] = Instant.now()
                     }
                 }
             }
