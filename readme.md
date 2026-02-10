@@ -1,8 +1,8 @@
 # Astro-Reason
 
-Astro-Reason is a research-oriented pipeline for evaluating whether statistically meaningful correlations exist between birth chart configurations and personality traits derived from biographical text.
+Astro-Reason is a research-oriented pipeline for evaluating whether statistically meaningful correlations exist between birth chart configurations and semantic embeddings derived from biographical text.
 
-The system uses NLP to extract personality structure from biographies (via Yuri Burlan’s System-Vector Psychology) and compares those numerical traits against encoded astrological features. Semantic embeddings are also produced to support similarity analysis, clustering, and data quality control.
+The system computes semantic embeddings from biographies and compares those vectors against encoded astrological features. Trait vectors (Yuri Burlan’s System-Vector Psychology) are still produced for interpretability and auxiliary analysis.
 
 ---
 
@@ -17,7 +17,7 @@ The system:
    - **Yuri Burlan 8-vector personality profile** using a local LLM
    - **Semantic embeddings** to capture broader personality “vibe”
 3. Encodes birth charts into **numeric astro features**
-4. Applies statistical correlation and modeling to evaluate alignment
+4. Applies statistical correlation and modeling to evaluate alignment (embeddings ↔ astro features)
 
 The purpose is not advocacy for astrology, but scientific measurement of potential structure that may link symbolic birth data to observable psychological traits.
 
@@ -35,9 +35,9 @@ AstroDatabank XML
       bio_text
    ┌─────────────┬──────────────────┐
    ↓ NLP: LLM scoring               ↓ NLP: embeddings
- nlp_vectors (8D Burlan)        embeddings (semantic)
-                                    ↓
-                              similarity + QC
+  nlp_vectors (8D Burlan)        embeddings (semantic)
+                                   ↓
+                         stats correlation (async)
         ↓
 Astrological encoding (ephemeris)
  astro_features (numeric)
@@ -63,7 +63,7 @@ Astrological encoding / astro features – topic: `astro`:
 The astro worker consumes `"astro.compute_features"` jobs from Kafka, computes ephemeris‑based features (Swiss Ephemeris with Skyfield fallback) and stores structured astro features + a flat numeric feature vector in `astro_features`.
 
 Storage & analysis:
-All along, PostgreSQL is the source of truth for people, births, bios, traits, embeddings, and astro features. Kafka is used as the job queue between steps (`default` → ingest, `embeddings` for semantic vectors after wiki enrichment, `traits` for Burlan scoring). From there you can query/visualize/analyze whenever you like.
+All along, PostgreSQL is the source of truth for people, births, bios, traits, embeddings, and astro features. Kafka is used as the job queue between steps (`default` → ingest, `embeddings` for semantic vectors after wiki enrichment, `traits` for Burlan scoring, `stats` for correlation jobs). From there you can query/visualize/analyze whenever you like.
 
 
 ### System Components
@@ -74,6 +74,7 @@ All along, PostgreSQL is the source of truth for people, births, bios, traits, e
 | Worker | NLP + astro computation jobs |
 | **Ollama** (local LLM) | Burlan vector scoring with controlled JSON output |
 | Embeddings service | Semantic vector creation (BGE models) |
+| Stats worker | Async embeddings ↔ astro correlation jobs |
 | PostgreSQL + pgvector | Data and vector storage |
 | Kafka | Job queue |
 | MinIO | Raw biography text object storage |
@@ -139,12 +140,13 @@ docker compose up -d --build
 
 ### Kafka topics (required)
 
-The pipeline expects the `traits` and `embeddings` topics to exist. Create them once:
+The pipeline expects the `traits`, `embeddings`, and `stats` topics to exist. Create them once:
 
 ```bash
 docker compose exec -T kafka rpk topic create traits
 docker compose exec -T kafka rpk topic create embeddings
 docker compose exec -T kafka rpk topic create astro
+docker compose exec -T kafka rpk topic create stats
 ```
 
 Verify:

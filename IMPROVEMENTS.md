@@ -1,6 +1,6 @@
 High: hardcoded default credentials — docker-compose.yml includes defaults like postgres, minio123, admin. Fine for local dev, risky if reused in production.
 Gaps and coherence risks
-Stats/correlation service: The API exposes correlation endpoints, but there’s no dedicated stats service or batch computation pipeline. This suggests the system might rely on on-demand computation, which may not match performance expectations in docs.
+Stats/correlation service: Implemented as an async Kafka worker with DB summary + S3 full results; monitor throughput and storage costs as dataset scales.
 
 
 

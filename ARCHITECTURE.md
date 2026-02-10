@@ -2,7 +2,7 @@
 
 ## Overview
 
-Astro-Reason is a microservices-based research pipeline that evaluates correlations between astrological birth chart configurations and personality traits derived from biographical text. The system uses NLP to extract personality structure from biographies and compares those traits against encoded astrological features.
+Astro-Reason is a microservices-based research pipeline that evaluates correlations between astrological birth chart configurations and semantic embeddings derived from biographical text. Trait vectors are also computed for interpretability, but correlation is embeddings ↔ astro features.
 
 ## System Architecture
 
@@ -61,6 +61,12 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
    ├─→ Processes birth data
    ├─→ Computes astrological features
    └─→ Writes → PostgreSQL (astro_features)
+
+7. Stats Worker (Kotlin)
+   ├─→ Reads from Kafka (stats topic)
+   ├─→ Computes embeddings ↔ astro correlations
+   ├─→ Stores summary in job_status
+   └─→ Writes full results to MinIO/S3
 ```
 
 ## Technology Stack
@@ -103,6 +109,8 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - `GET /version` - Version information
 - `POST /ingest/astrodatabank` - Upload XML file
 - `GET /jobs/{jobId}` - Get job status
+- `GET /stats/correlation` - Enqueue correlation job
+- `GET /stats/correlation/{jobId}` - Fetch correlation result/status
 
 **Dependencies**: Database, Kafka, MinIO
 
@@ -114,7 +122,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - Parse AstroDatabank XML files
 - Extract person, birth, and biography data
 - Batch insert into PostgreSQL
-- Enqueue embedding jobs
+- Enqueue embedding jobs (after wiki enrichment, via fetch-bio)
 
 **Key Components**:
 - `XmlParser.kt` - Streaming XML parser (StAX)
@@ -182,6 +190,17 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - sound, visual, oral, anal, urethral, skin, muscular, olfactory
 
 **Dependencies**: Database, Kafka, Ollama
+
+### 7. Stats Worker (`service/api` + `CorrelationWorker`)
+
+**Technology**: Kotlin  
+**Queue**: `stats`  
+**Responsibilities**:
+- Compute embeddings ↔ astro correlations asynchronously
+- Store summary in `job_status.result`
+- Persist full correlation JSON to MinIO/S3 and return signed URLs
+
+**Dependencies**: Database, Kafka, MinIO
 
 ### 7. Astro Service (`service/astro`)
 

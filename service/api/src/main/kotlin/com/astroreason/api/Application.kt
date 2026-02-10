@@ -19,6 +19,7 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.utils.io.core.readBytes
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.decodeFromString
 import java.util.*
 
 fun main(args: Array<String>) {
@@ -42,6 +43,7 @@ fun Application.module() {
             ignoreUnknownKeys = true
         })
     }
+    val json = Json { ignoreUnknownKeys = true; isLenient = true }
     
     install(CORS) {
         allowMethod(HttpMethod.Options)
@@ -126,8 +128,41 @@ fun Application.module() {
             get("/correlation") {
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull()
                 val minSamples = call.request.queryParameters["minSamples"]?.toIntOrNull() ?: 3
-                val rows = loadNlpAstroRows(limit)
-                call.respond(buildCorrelationResponse(rows, minSamples))
+                val job = jobQueue.enqueueCorrelation(limit, minSamples)
+                call.respond(
+                    CorrelationJobResponse(
+                        jobId = job.id,
+                        status = job.status.name.lowercase(),
+                        enqueuedAt = job.enqueuedAt.toString()
+                    )
+                )
+            }
+
+            get("/correlation/{jobId}") {
+                val jobId = call.parameters["jobId"] ?: run {
+                    call.respond(HttpStatusCode.BadRequest, "Missing job_id")
+                    return@get
+                }
+                val job = jobQueue.getJobStatus(jobId) ?: run {
+                    call.respond(HttpStatusCode.NotFound, "Job not found")
+                    return@get
+                }
+                val result = job.result?.let {
+                    runCatching { json.decodeFromString<CorrelationJobResult>(it) }.getOrNull()
+                }
+                val s3Url = result?.s3Uri?.let { storage.presignGetUrlFromUri(it) }
+                call.respond(
+                    CorrelationJobResponse(
+                        jobId = job.id,
+                        status = job.status.name.lowercase(),
+                        enqueuedAt = job.enqueuedAt.toString(),
+                        startedAt = job.startedAt?.toString(),
+                        endedAt = job.endedAt?.toString(),
+                        excInfo = job.excInfo,
+                        result = result,
+                        s3Url = s3Url
+                    )
+                )
             }
 
             get("/feature-importance") {

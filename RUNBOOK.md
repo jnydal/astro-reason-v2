@@ -122,6 +122,28 @@ Astro service runs automatically:
 docker compose logs -f astro
 ```
 
+### Step 6: Run Correlation Jobs (async)
+
+The stats worker processes correlation jobs:
+- Reads from `stats` topic
+- Computes embeddings ↔ astro correlations
+- Stores summary in `job_status` and full JSON in MinIO/S3
+
+**Enqueue**:
+```bash
+curl http://localhost:8000/stats/correlation
+```
+
+**Check status / results**:
+```bash
+curl http://localhost:8000/stats/correlation/<jobId>
+```
+
+**Monitor**:
+```bash
+docker compose logs -f stats-worker
+```
+
 ## Database Queries
 
 ### Check Pipeline Progress
@@ -166,6 +188,8 @@ docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
   --bootstrap-server localhost:9092 --describe --topic embeddings
 docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
   --bootstrap-server localhost:9092 --describe --topic traits
+docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe --topic stats
 ```
 
 ## Troubleshooting

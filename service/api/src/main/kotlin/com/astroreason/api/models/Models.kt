@@ -47,9 +47,31 @@ data class CorrelationFeatureRow(
 
 @Serializable
 data class CorrelationResponse(
-    val nlpVectorOrder: List<String>,
+    val nlpVectorOrder: List<String> = emptyList(),
     val astroFeatureOrder: List<String>,
-    val rows: List<CorrelationFeatureRow>
+    val rows: List<CorrelationFeatureRow>,
+    val embeddingDim: Int = 0,
+    val embeddingIndexOrder: List<Int> = emptyList()
+)
+
+@Serializable
+data class CorrelationJobResult(
+    val embeddingDim: Int,
+    val astroFeatureOrder: List<String>,
+    val featureImportance: List<FeatureImportanceEntry>,
+    val s3Uri: String? = null
+)
+
+@Serializable
+data class CorrelationJobResponse(
+    val jobId: String,
+    val status: String,
+    val enqueuedAt: String? = null,
+    val startedAt: String? = null,
+    val endedAt: String? = null,
+    val excInfo: String? = null,
+    val result: CorrelationJobResult? = null,
+    val s3Url: String? = null
 )
 
 @Serializable

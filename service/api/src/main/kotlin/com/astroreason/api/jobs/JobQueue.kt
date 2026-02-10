@@ -12,6 +12,12 @@ class ApiJobQueue {
         groupId = null,
         clientId = "api-producer"
     )
+    private val statsQueue: JobQueue = createJobQueue(
+        Config.settings.kafkaBootstrapServers,
+        System.getenv("KAFKA_STATS_TOPIC") ?: "stats",
+        groupId = null,
+        clientId = "api-producer"
+    )
 
     fun enqueueParseAdbXml(objectUri: String, sourceLabel: String = "upload"): Job {
         return jobQueue.enqueue(
@@ -19,6 +25,20 @@ class ApiJobQueue {
             objectUri,
             kwargs = mapOf("source" to sourceLabel),
             jobTimeout = 1800,
+            failureTtl = 86400,
+            resultTtl = 86400
+        )
+    }
+
+    fun enqueueCorrelation(limit: Int?, minSamples: Int): Job {
+        val kwargs = buildMap {
+            put("minSamples", minSamples.toString())
+            limit?.let { put("limit", it.toString()) }
+        }
+        return statsQueue.enqueue(
+            function = "stats.correlation",
+            kwargs = kwargs,
+            jobTimeout = 3600,
             failureTtl = 86400,
             resultTtl = 86400
         )

@@ -44,6 +44,28 @@ services:
       timeout: 2s
       retries: 10
 
+  stats-worker:
+    build:
+      context: .
+      dockerfile: ./service/api/Dockerfile
+    env_file: ./.env
+    environment:
+      PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      KAFKA_STATS_TOPIC: ${KAFKA_STATS_TOPIC:-stats}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minio}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minio123}
+      MINIO_BUCKET_RAW: ${MINIO_BUCKET_RAW:-astro-raw}
+    depends_on:
+      db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    entrypoint: [ "java", "-cp", "/app/lib/*", "com.astroreason.api.stats.CorrelationWorkerKt" ]
+
   # Traits processor (LLM + storages)
   traits:
     build:

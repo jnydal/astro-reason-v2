@@ -30,6 +30,8 @@ val NLP_VECTOR_ORDER = listOf(
     "sound", "visual", "oral", "anal", "urethral", "skin", "muscular", "olfactory"
 )
 
+private val EMBEDDING_DIM_PREFERENCE = listOf(1024, 768, 384, 1536)
+
 data class StatsRow(
     val personId: UUID,
     val nlp: Map<String, Double>,
@@ -40,6 +42,11 @@ data class ClusterRow(
     val personId: UUID,
     val embedding: List<Double>,
     val astro: Map<String, Double>
+)
+
+data class EmbeddingSelection(
+    val embeddingDim: Int,
+    val rows: List<ClusterRow>
 )
 
 data class PersonPoint(
@@ -111,6 +118,17 @@ fun loadEmbeddingAstroRows(limit: Int? = null, modelName: String? = null): List<
     }
 }
 
+fun loadEmbeddingAstroRowsForCorrelation(limit: Int? = null): EmbeddingSelection {
+    return transaction(DatabaseManager.getDatabase()) {
+        val selectedDim = EMBEDDING_DIM_PREFERENCE.firstOrNull { dim ->
+            embeddingTableHasRows(dim)
+        } ?: return@transaction EmbeddingSelection(0, emptyList())
+
+        val rows = loadEmbeddingAstroRowsForDim(selectedDim, limit, modelName = null)
+        EmbeddingSelection(selectedDim, rows)
+    }
+}
+
 fun buildCorrelationResponse(rows: List<StatsRow>, minSamples: Int = 3): CorrelationResponse {
     val astroFeatureOrder = rows.flatMap { it.astro.keys }.toSet().sorted()
     val pearson = PearsonsCorrelation()
@@ -151,8 +169,78 @@ fun buildCorrelationResponse(rows: List<StatsRow>, minSamples: Int = 3): Correla
     )
 }
 
+fun buildEmbeddingCorrelationResponse(
+    rows: List<ClusterRow>,
+    embeddingDim: Int,
+    minSamples: Int = 3
+): CorrelationResponse {
+    if (rows.isEmpty()) {
+        return CorrelationResponse(
+            nlpVectorOrder = emptyList(),
+            astroFeatureOrder = emptyList(),
+            rows = emptyList(),
+            embeddingDim = 0,
+            embeddingIndexOrder = emptyList()
+        )
+    }
+
+    val effectiveDim = rows.first().embedding.size.takeIf { it > 0 } ?: embeddingDim
+    val embeddingIndexOrder = (0 until effectiveDim).toList()
+    val astroFeatureOrder = rows.flatMap { it.astro.keys }.toSet().sorted()
+    val pearson = PearsonsCorrelation()
+    val spearman = SpearmansCorrelation()
+
+    val responseRows = astroFeatureOrder.map { feature ->
+        val stats = embeddingIndexOrder.associate { idx ->
+            val pairs = rows.mapNotNull { row ->
+                val x = row.embedding.getOrNull(idx)
+                val y = row.astro[feature]
+                if (x != null && y != null) x to y else null
+            }
+
+            val cell = if (pairs.size < minSamples) {
+                CorrelationCell(n = pairs.size)
+            } else {
+                val xArr = pairs.map { it.first }.toDoubleArray()
+                val yArr = pairs.map { it.second }.toDoubleArray()
+                val pearsonR = safeCorrelation { pearson.correlation(xArr, yArr) }
+                val spearmanR = safeCorrelation { spearman.correlation(xArr, yArr) }
+                CorrelationCell(
+                    n = pairs.size,
+                    pearson = pearsonR,
+                    pearsonP = pearsonR?.let { pValueForCorrelation(it, pairs.size) },
+                    spearman = spearmanR,
+                    spearmanP = spearmanR?.let { pValueForCorrelation(it, pairs.size) }
+                )
+            }
+
+            idx.toString() to cell
+        }
+
+        CorrelationFeatureRow(feature = feature, stats = stats)
+    }
+
+    return CorrelationResponse(
+        nlpVectorOrder = emptyList(),
+        astroFeatureOrder = astroFeatureOrder,
+        rows = responseRows,
+        embeddingDim = effectiveDim,
+        embeddingIndexOrder = embeddingIndexOrder
+    )
+}
+
 fun buildFeatureImportance(rows: List<StatsRow>, minSamples: Int = 3): FeatureImportanceResponse {
     val correlation = buildCorrelationResponse(rows, minSamples)
+    val entries = correlation.rows.map { row ->
+        val values = row.stats.values.mapNotNull { it.pearson?.let { v -> abs(v) } }
+        val meanAbs = if (values.isEmpty()) 0.0 else values.sum() / values.size
+        FeatureImportanceEntry(feature = row.feature, meanAbsPearson = meanAbs, n = values.size)
+    }.sortedByDescending { it.meanAbsPearson }
+
+    return FeatureImportanceResponse(entries = entries)
+}
+
+fun buildFeatureImportanceFromCorrelation(correlation: CorrelationResponse): FeatureImportanceResponse {
     val entries = correlation.rows.map { row ->
         val values = row.stats.values.mapNotNull { it.pearson?.let { v -> abs(v) } }
         val meanAbs = if (values.isEmpty()) 0.0 else values.sum() / values.size
@@ -275,6 +363,77 @@ internal fun parsePgVector(raw: String): List<Double> {
         entry.trim().takeIf { it.isNotEmpty() }?.toDoubleOrNull()
     }
 }
+
+private fun embeddingTableHasRows(dim: Int): Boolean {
+    val query = when (dim) {
+        1024 -> Embeddings1024.slice(Embeddings1024.personId).selectAll().limit(1)
+        768 -> Embeddings768.slice(Embeddings768.personId).selectAll().limit(1)
+        384 -> Embeddings384.slice(Embeddings384.personId).selectAll().limit(1)
+        1536 -> Embeddings1536.slice(Embeddings1536.personId).selectAll().limit(1)
+        else -> return false
+    }
+    return query.firstOrNull() != null
+}
+
+private fun loadEmbeddingAstroRowsForDim(
+    dim: Int,
+    limit: Int? = null,
+    modelName: String? = null
+): List<ClusterRow> {
+    val (personCol, modelCol, vectorCol, updatedCol, tableName) = when (dim) {
+        1024 -> EmbeddingColumns(
+            Embeddings1024.personId, Embeddings1024.modelName, Embeddings1024.vector, Embeddings1024.updatedAt, Embeddings1024.tableName
+        )
+        768 -> EmbeddingColumns(
+            Embeddings768.personId, Embeddings768.modelName, Embeddings768.vector, Embeddings768.updatedAt, Embeddings768.tableName
+        )
+        384 -> EmbeddingColumns(
+            Embeddings384.personId, Embeddings384.modelName, Embeddings384.vector, Embeddings384.updatedAt, Embeddings384.tableName
+        )
+        1536 -> EmbeddingColumns(
+            Embeddings1536.personId, Embeddings1536.modelName, Embeddings1536.vector, Embeddings1536.updatedAt, Embeddings1536.tableName
+        )
+        else -> return emptyList()
+    }
+
+    val query = when (tableName) {
+        Embeddings1024.tableName -> Embeddings1024
+        Embeddings768.tableName -> Embeddings768
+        Embeddings384.tableName -> Embeddings384
+        Embeddings1536.tableName -> Embeddings1536
+        else -> return emptyList()
+    }
+        .join(AstroFeatures, org.jetbrains.exposed.sql.JoinType.INNER, personCol, AstroFeatures.id)
+        .slice(personCol, modelCol, vectorCol, updatedCol, AstroFeatures.featureVec)
+        .select { if (modelName != null) modelCol eq modelName else modelCol.isNotNull() }
+        .orderBy(updatedCol, SortOrder.DESC_NULLS_LAST)
+
+    if (limit != null) {
+        query.limit(limit)
+    }
+
+    val rows = query.mapNotNull { row ->
+        val embedding = parsePgVector(row[vectorCol])
+        val astro = parseDoubleMap(row[AstroFeatures.featureVec])
+        if (embedding.isEmpty() || astro.isEmpty()) {
+            null
+        } else {
+            ClusterRow(row[personCol], embedding, astro)
+        }
+    }
+
+    return rows.groupBy { it.personId }.values.mapNotNull { group ->
+        group.firstOrNull()
+    }
+}
+
+private data class EmbeddingColumns(
+    val personId: org.jetbrains.exposed.sql.Column<UUID>,
+    val modelName: org.jetbrains.exposed.sql.Column<String>,
+    val vector: org.jetbrains.exposed.sql.Column<String>,
+    val updatedAt: org.jetbrains.exposed.sql.Column<*>,
+    val tableName: String
+)
 
 private fun safeCorrelation(calc: () -> Double): Double? {
     val value = runCatching { calc() }.getOrNull()

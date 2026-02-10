@@ -9,7 +9,7 @@ Astro‑Reason is a multi‑stage pipeline that transforms biographical and temp
 The pipeline enables:
 - Population‑level analyses of biographical text and inferred traits  
 - Semantic similarity and clustering in large corpora of biographies  
-- Exploratory correlations between astrological features and NLP‑derived traits  
+- Exploratory correlations between astrological features and semantic embeddings  
 - Auditability and reproducibility for scientific usage  
 
 ---
