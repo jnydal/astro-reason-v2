@@ -14,9 +14,9 @@ SELECT
       SELECT person_id FROM embeddings_1536
   ) emb_all) AS embeddings_computed,
   (SELECT COUNT(*) FROM astro_features) AS astro_features_computed,
-  (SELECT COUNT(*) FROM provenance_event
-     WHERE stage = 'correlation'
-       AND COALESCE(detail->>'status', 'ok') = 'ok') AS correlations_computed;
+  (SELECT COUNT(*) FROM job_status
+     WHERE function = 'stats.correlation'
+       AND status = 'FINISHED') AS correlations_computed;
 
 CREATE OR REPLACE VIEW pipeline_stage_daily AS
 SELECT
