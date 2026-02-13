@@ -155,7 +155,8 @@ PostgreSQL datasource points at the local `db` container.
 
 Dashboards:
 - `Pipeline Observability` provides counts for people, embeddings, astro
-  features, and correlation placeholders, plus throughput and stuck-job views.
+  features, astrological readings created, and correlations computed, plus
+  throughput and stuck-job views.
 
 Alerts:
 - `Pipeline stuck` triggers when any record has not progressed within the 24h SLA.
@@ -166,7 +167,8 @@ Runbook:
 - If `Pipeline errors` fires, review recent `provenance_event` rows with
   `detail->>'status' = 'error'` and check worker logs.
 - Adjust SLA/thresholds by editing `infra/sql/003_observability.sql` and
-  `grafana/provisioning/alerting/alerts.yml`.
+  `grafana/provisioning/alerting/alerts.yml`. The `pipeline_counts` view is
+  extended in `infra/sql/009_pipeline_counts_readings.sql` (astro readings count).
 
 ---
 

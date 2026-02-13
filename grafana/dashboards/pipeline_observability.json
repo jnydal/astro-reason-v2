@@ -66,6 +66,24 @@
       "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 }
     },
     {
+      "id": 8,
+      "type": "stat",
+      "title": "Astrological Readings Created",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT astro_readings_created AS value FROM pipeline_counts;"
+        }
+      ],
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 }
+    },
+    {
       "id": 5,
       "type": "stat",
       "title": "Correlations Computed",
@@ -81,7 +99,7 @@
           "rawSql": "SELECT correlations_computed AS value FROM pipeline_counts;"
         }
       ],
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 }
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 }
     },
     {
       "id": 6,
