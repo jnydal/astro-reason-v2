@@ -131,6 +131,17 @@ ORDER BY created_at DESC
 LIMIT 10;
 ```
 
+**Backfill readings (one-off)** — when you already have people with embeddings and astro features but no `astro.interpret` jobs were enqueued (e.g. DB populated without going through ingest), enqueue interpret jobs for all such people so the interpreter can fill `astro_interpretations` and you can run correlation:
+
+```bash
+# Rebuild so the image includes the script (if you added it recently)
+docker compose build astro-interpreter
+
+docker compose run --rm astro-interpreter python -m service.worker_astro_interpret.app.enqueue_interpret
+```
+
+This enqueues one `astro.interpret` job per person who has both embeddings and astro_features (same count as "Embeddings Computed" in pipeline observability). Ensure the astro-interpreter worker is running to process the queue.
+
 ### Step 6: Run Correlation Jobs (async)
 
 The stats worker processes correlation jobs:
