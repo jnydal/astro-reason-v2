@@ -30,24 +30,6 @@
       "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 }
     },
     {
-      "id": 2,
-      "type": "stat",
-      "title": "Traits Scored",
-      "datasource": {
-        "type": "postgres",
-        "uid": "postgres"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT traits_scored AS value FROM pipeline_counts;"
-        }
-      ],
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 }
-    },
-    {
       "id": 3,
       "type": "stat",
       "title": "Embeddings Computed",
@@ -132,7 +114,7 @@
           "refId": "A",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT person_id, last_event_at, hours_since_last_event, missing_traits, missing_embeddings, missing_astro FROM pipeline_stuck ORDER BY hours_since_last_event DESC LIMIT 200;"
+          "rawSql": "SELECT person_id, last_event_at, hours_since_last_event, missing_embeddings, missing_astro FROM pipeline_stuck ORDER BY hours_since_last_event DESC LIMIT 200;"
         }
       ],
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 }

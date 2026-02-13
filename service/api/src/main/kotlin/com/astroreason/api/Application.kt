@@ -168,8 +168,17 @@ fun Application.module() {
             get("/feature-importance") {
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull()
                 val minSamples = call.request.queryParameters["minSamples"]?.toIntOrNull() ?: 3
-                val rows = loadNlpAstroRows(limit)
-                call.respond(buildFeatureImportance(rows, minSamples))
+                val selection = loadEmbeddingAstroRowsForCorrelation(limit)
+                if (selection.rows.isEmpty()) {
+                    call.respond(FeatureImportanceResponse(entries = emptyList()))
+                } else {
+                    val correlation = buildEmbeddingCorrelationResponse(
+                        selection.rows,
+                        selection.embeddingDim,
+                        minSamples
+                    )
+                    call.respond(buildFeatureImportanceFromCorrelation(correlation))
+                }
             }
 
             get("/clusters") {
@@ -220,10 +229,9 @@ fun Application.module() {
                 val format = call.request.queryParameters["format"]?.lowercase() ?: "json"
                 val clusterK = call.request.queryParameters["clusterK"]?.toIntOrNull()
                 val clusterModel = call.request.queryParameters["clusterModel"]
-                val rows = loadNlpAstroRows(limit)
+                val clusterRows = loadEmbeddingAstroRows(limit, clusterModel)
 
-                val clusterAssignments = if (clusterK != null && clusterK >= 2) {
-                    val clusterRows = loadEmbeddingAstroRows(limit, clusterModel)
+                val clusterAssignments = if (clusterK != null && clusterK >= 2 && clusterRows.isNotEmpty()) {
                     val astroFeatureOrder = clusterRows
                         .map { it.astro.keys.toSet() }
                         .reduceOrNull { acc, keys -> acc.intersect(keys) }
@@ -240,7 +248,7 @@ fun Application.module() {
                     emptyMap()
                 }
 
-                val export = buildExportResponse(rows, clusterAssignments)
+                val export = buildExportResponse(clusterRows, clusterAssignments)
 
                 if (format == "csv") {
                     val csv = buildExportCsv(export, includeClusters = clusterAssignments.isNotEmpty())

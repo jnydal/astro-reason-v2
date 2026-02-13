@@ -5,7 +5,6 @@ This script:
 - Fetches and cleans Wikipedia wikitext
 - Updates the bio_text table
 - Enqueues downstream jobs via Kafka:
-  - Traits scoring on the `traits` topic (Kotlin worker)
   - Semantic embeddings on the `embeddings` topic (Python worker)
 """
 
@@ -104,28 +103,6 @@ def _insert_job_status(cur, job: dict) -> None:
     )
 
 
-def _enqueue_traits_job(producer: Producer, cur, person_id):
-    """Enqueue a traits scoring job in the JSON format used by the Kotlin JobQueue."""
-    job_id = str(uuid.uuid4())
-    now_ms = int(time.time() * 1000)
-
-    job = {
-        "id": job_id,
-        "function": "traits.score_person",
-        "args": [str(person_id)],
-        "kwargs": {},
-        "status": "QUEUED",
-        "enqueuedAt": now_ms,
-        "startedAt": None,
-        "endedAt": None,
-        "result": None,
-        "excInfo": None,
-    }
-
-    _insert_job_status(cur, job)
-    producer.produce(os.getenv("KAFKA_TRAITS_TOPIC", "traits"), key=job_id, value=json.dumps(job))
-
-
 def _normalize_dsn(dsn: str) -> str:
     # psycopg2 expects postgresql://, not SQLAlchemy-style postgresql+psycopg://
     if dsn.startswith("postgresql+psycopg://"):
@@ -170,11 +147,6 @@ def run(dsn, lang="en", limit=500):
             LIMIT 1
         ) bt ON TRUE
         WHERE COALESCE(el.qid, bt.qid) IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1
-            FROM nlp_vectors nv
-            WHERE nv.person_id = pr.id
-        )
     """
     if limit and int(limit) > 0:
         cur.execute(base_query + " LIMIT %s", (int(limit),))
@@ -283,9 +255,6 @@ def run(dsn, lang="en", limit=500):
 
         wrote += 1
         enriched_ids.append(person_id)
-
-        # Enqueue traits scoring for this person
-        _enqueue_traits_job(producer, cur, person_id)
 
     conn.commit()
 

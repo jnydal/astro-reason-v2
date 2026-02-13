@@ -26,17 +26,7 @@ import kotlin.math.sqrt
 
 private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-val NLP_VECTOR_ORDER = listOf(
-    "sound", "visual", "oral", "anal", "urethral", "skin", "muscular", "olfactory"
-)
-
 private val EMBEDDING_DIM_PREFERENCE = listOf(1024, 768, 384, 1536)
-
-data class StatsRow(
-    val personId: UUID,
-    val nlp: Map<String, Double>,
-    val astro: Map<String, Double>
-)
 
 data class ClusterRow(
     val personId: UUID,
@@ -54,31 +44,6 @@ data class PersonPoint(
     val vector: DoubleArray
 ) : Clusterable {
     override fun getPoint(): DoubleArray = vector
-}
-
-fun loadNlpAstroRows(limit: Int? = null): List<StatsRow> {
-    return transaction(DatabaseManager.getDatabase()) {
-        val query = NlpVectors
-            .join(AstroFeatures, org.jetbrains.exposed.sql.JoinType.INNER, NlpVectors.personId, AstroFeatures.id)
-            .slice(NlpVectors.personId, NlpVectors.vectors, AstroFeatures.featureVec)
-            .selectAll()
-
-        if (limit != null) {
-            query.limit(limit)
-        }
-
-        query.mapNotNull { row ->
-            val nlpRaw = row[NlpVectors.vectors]
-            val astroRaw = row[AstroFeatures.featureVec]
-            val nlp = parseNlpVector(nlpRaw)
-            val astro = parseDoubleMap(astroRaw)
-            if (nlp.size != NLP_VECTOR_ORDER.size || astro.isEmpty()) {
-                null
-            } else {
-                StatsRow(row[NlpVectors.personId], nlp, astro)
-            }
-        }
-    }
 }
 
 fun loadEmbeddingAstroRows(limit: Int? = null, modelName: String? = null): List<ClusterRow> {
@@ -127,46 +92,6 @@ fun loadEmbeddingAstroRowsForCorrelation(limit: Int? = null): EmbeddingSelection
         val rows = loadEmbeddingAstroRowsForDim(selectedDim, limit, modelName = null)
         EmbeddingSelection(selectedDim, rows)
     }
-}
-
-fun buildCorrelationResponse(rows: List<StatsRow>, minSamples: Int = 3): CorrelationResponse {
-    val astroFeatureOrder = rows.flatMap { it.astro.keys }.toSet().sorted()
-    val pearson = PearsonsCorrelation()
-    val spearman = SpearmansCorrelation()
-
-    val responseRows = astroFeatureOrder.map { feature ->
-        val stats = NLP_VECTOR_ORDER.associateWith { nlpKey ->
-            val pairs = rows.mapNotNull { row ->
-                val x = row.nlp[nlpKey]
-                val y = row.astro[feature]
-                if (x != null && y != null) x to y else null
-            }
-
-            if (pairs.size < minSamples) {
-                CorrelationCell(n = pairs.size)
-            } else {
-                val xArr = pairs.map { it.first }.toDoubleArray()
-                val yArr = pairs.map { it.second }.toDoubleArray()
-                val pearsonR = safeCorrelation { pearson.correlation(xArr, yArr) }
-                val spearmanR = safeCorrelation { spearman.correlation(xArr, yArr) }
-                CorrelationCell(
-                    n = pairs.size,
-                    pearson = pearsonR,
-                    pearsonP = pearsonR?.let { pValueForCorrelation(it, pairs.size) },
-                    spearman = spearmanR,
-                    spearmanP = spearmanR?.let { pValueForCorrelation(it, pairs.size) }
-                )
-            }
-        }
-
-        CorrelationFeatureRow(feature = feature, stats = stats)
-    }
-
-    return CorrelationResponse(
-        nlpVectorOrder = NLP_VECTOR_ORDER,
-        astroFeatureOrder = astroFeatureOrder,
-        rows = responseRows
-    )
 }
 
 fun buildEmbeddingCorrelationResponse(
@@ -229,17 +154,6 @@ fun buildEmbeddingCorrelationResponse(
     )
 }
 
-fun buildFeatureImportance(rows: List<StatsRow>, minSamples: Int = 3): FeatureImportanceResponse {
-    val correlation = buildCorrelationResponse(rows, minSamples)
-    val entries = correlation.rows.map { row ->
-        val values = row.stats.values.mapNotNull { it.pearson?.let { v -> abs(v) } }
-        val meanAbs = if (values.isEmpty()) 0.0 else values.sum() / values.size
-        FeatureImportanceEntry(feature = row.feature, meanAbsPearson = meanAbs, n = values.size)
-    }.sortedByDescending { it.meanAbsPearson }
-
-    return FeatureImportanceResponse(entries = entries)
-}
-
 fun buildFeatureImportanceFromCorrelation(correlation: CorrelationResponse): FeatureImportanceResponse {
     val entries = correlation.rows.map { row ->
         val values = row.stats.values.mapNotNull { it.pearson?.let { v -> abs(v) } }
@@ -293,14 +207,23 @@ fun buildClusterResponse(
 }
 
 fun buildExportResponse(
-    rows: List<StatsRow>,
+    rows: List<ClusterRow>,
     clusterAssignments: Map<UUID, Int>? = null
 ): ExportResponse {
+    if (rows.isEmpty()) {
+        return ExportResponse(
+            rows = emptyList(),
+            embeddingIndexOrder = emptyList(),
+            astroFeatureOrder = emptyList()
+        )
+    }
     val astroFeatureOrder = rows.flatMap { it.astro.keys }.toSet().sorted()
+    val dim = rows.maxOfOrNull { it.embedding.size } ?: 0
+    val embeddingIndexOrder = (0 until dim).map { it.toString() }
     val exportRows = rows.map { row ->
         ExportRow(
             personId = row.personId.toString(),
-            nlp = NLP_VECTOR_ORDER.associateWith { row.nlp[it] ?: 0.0 },
+            embedding = row.embedding,
             astro = astroFeatureOrder.associateWith { row.astro[it] ?: 0.0 },
             cluster = clusterAssignments?.get(row.personId)
         )
@@ -308,7 +231,7 @@ fun buildExportResponse(
 
     return ExportResponse(
         rows = exportRows,
-        nlpVectorOrder = NLP_VECTOR_ORDER,
+        embeddingIndexOrder = embeddingIndexOrder,
         astroFeatureOrder = astroFeatureOrder
     )
 }
@@ -319,7 +242,7 @@ fun buildExportCsv(
 ): String {
     val header = buildList {
         add("person_id")
-        addAll(export.nlpVectorOrder.map { "nlp_$it" })
+        addAll(export.embeddingIndexOrder.map { "embedding_$it" })
         addAll(export.astroFeatureOrder.map { "astro_$it" })
         if (includeClusters) add("cluster_id")
     }
@@ -327,7 +250,9 @@ fun buildExportCsv(
     val rows = export.rows.map { row ->
         val values = buildList {
             add(row.personId)
-            addAll(export.nlpVectorOrder.map { fmt(row.nlp[it] ?: 0.0) })
+            addAll(export.embeddingIndexOrder.mapIndexed { idx, _ ->
+                fmt(row.embedding.getOrNull(idx) ?: 0.0)
+            })
             addAll(export.astroFeatureOrder.map { fmt(row.astro[it] ?: 0.0) })
             if (includeClusters) add(row.cluster?.toString() ?: "")
         }
@@ -335,13 +260,6 @@ fun buildExportCsv(
     }
 
     return (listOf(header.joinToString(",") { csvEscape(it) }) + rows).joinToString("\n")
-}
-
-private fun parseNlpVector(raw: String): Map<String, Double> {
-    val parsed = parseDoubleMap(raw)
-    return NLP_VECTOR_ORDER.mapNotNull { key ->
-        parsed[key]?.let { key to it }
-    }.toMap()
 }
 
 private fun parseDoubleMap(raw: String): Map<String, Double> {

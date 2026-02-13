@@ -111,7 +111,7 @@ data class ClusterResponse(
 @Serializable
 data class ExportRow(
     val personId: String,
-    val nlp: Map<String, Double>,
+    val embedding: List<Double>,
     val astro: Map<String, Double>,
     val cluster: Int? = null
 )
@@ -119,6 +119,6 @@ data class ExportRow(
 @Serializable
 data class ExportResponse(
     val rows: List<ExportRow>,
-    val nlpVectorOrder: List<String>,
+    val embeddingIndexOrder: List<String>,
     val astroFeatureOrder: List<String>
 )

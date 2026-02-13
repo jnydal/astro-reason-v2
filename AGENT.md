@@ -65,9 +65,9 @@ Workers run continuously and process jobs from Kafka topics:
 
 - **worker-ingest**: Processes `default` topic
 - **embeddings**: Processes `embeddings` topic (Python)
-- **traits**: Processes `traits` topic
 - **resolver**: Polls database directly
-- **astro**: Polls database directly
+- **astro**: Consumes `astro` topic (group: astro-worker), produces `astro.interpret` jobs
+- **astro-interpreter**: Consumes `astro` topic (group: astro-interpreter), handles `astro.interpret`, writes to `astro_interpretations`
 
 ## Service Configuration
 

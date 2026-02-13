@@ -1,13 +1,13 @@
 # Astro‑Reason Pipeline: Scientific Dataflow and Methodology (NLP & Computational Social Science)
 
 ## 1. Abstract
-Astro‑Reason is a multi‑stage pipeline that transforms biographical and temporal‑spatial records into structured textual, semantic, and astrological features. This document details the scientific workflow, including data ingestion, entity resolution, enrichment, embedding generation, trait inference, and deterministic astronomical feature computation. We emphasize reproducibility, provenance, and methodological transparency to support research‑grade analysis.
+Astro‑Reason is a multi‑stage pipeline that transforms biographical and temporal‑spatial records into structured textual, semantic, and astrological features. This document details the scientific workflow, including data ingestion, entity resolution, enrichment, embedding generation, deterministic astronomical feature computation, and LLM-based astrological reading generation. We emphasize reproducibility, provenance, and methodological transparency to support research‑grade analysis.
 
 ---
 
 ## 2. Scientific Goals
 The pipeline enables:
-- Population‑level analyses of biographical text and inferred traits  
+- Population‑level analyses of biographical text and semantic/astro features  
 - Semantic similarity and clustering in large corpora of biographies  
 - Exploratory correlations between astrological features and semantic embeddings  
 - Auditability and reproducibility for scientific usage  
@@ -39,8 +39,8 @@ Structured biographical records (e.g., XML) containing:
 2. **Entity Resolution**: link internal entities to Wikidata identifiers  
 3. **Enrichment**: fetch Wikipedia text for resolved entities  
 4. **Embeddings**: compute semantic vectors from biography text  
-5. **Trait Scoring**: infer interpretable trait vectors using an LLM  
-6. **Astrological Features**: compute deterministic astronomical feature vectors  
+5. **Astrological Features**: compute deterministic astronomical feature vectors  
+6. **Astro Interpreter**: LLM-generated astrological readings from chart data (for semantic comparison with biographies)  
 7. **Provenance & Observability**: log stage outputs and counts  
 
 ---
@@ -53,8 +53,8 @@ Structured biographical records (e.g., XML) containing:
 - `bio_text`: text, hash, source metadata  
 - `entity_link`: canonical entity resolution info  
 - `embeddings_*`: dense vector representations  
-- `nlp_vectors`: interpretable trait outputs  
 - `astro_features`: deterministic astrological features  
+- `astro_interpretations`: LLM-generated astrological readings per person  
 
 ---
 
@@ -110,23 +110,7 @@ Structured biographical records (e.g., XML) containing:
 
 ---
 
-### 6.5 Trait Inference (LLM‑based)
-**Input:** biography text  
-**Method:**  
-- LLM prompts produce structured trait vectors (`nlp_vectors`)  
-- Store model name, provider, confidence, prompt hash  
-
-**Scientific concern:**  
-- Construct validity: traits are model‑generated, not clinically validated  
-- Sensitivity to prompt design  
-
-**Recommendation:**  
-- Pre‑register trait definitions and prompt templates  
-- Validate output consistency on a human‑annotated benchmark  
-
----
-
-### 6.6 Astrological Feature Computation
+### 6.5 Astrological Feature Computation
 **Input:** birth date/time/location  
 **Method:**  
 - Deterministic astronomical calculations  
@@ -135,6 +119,18 @@ Structured biographical records (e.g., XML) containing:
 **Scientific concern:**  
 - Accuracy depends on time and location completeness  
 - Must record whether birth time is unknown  
+
+---
+
+### 6.6 Astro Interpreter (LLM‑based readings)
+**Input:** chart data from `astro_features` (longs, houses, aspects, elements, modalities)  
+**Method:**  
+- LLM prompt produces a short astrological reading in plain language  
+- Stored in `astro_interpretations` for semantic comparison with biography embeddings  
+
+**Scientific concern:**  
+- Interpretations are model‑generated and depend on prompt design  
+- Use for research comparison (e.g. embedding similarity with bios), not as standalone claims  
 
 ---
 
@@ -170,12 +166,11 @@ Every stage produces provenance events capturing:
 - Compare semantic similarity with external benchmarks (e.g., STS)  
 - Qualitative checks on clustered outputs  
 
-### 8.3 Traits
-- Human‑annotated trait scores for a subset  
-- Agreement statistics (e.g., Spearman correlation, Cohen’s kappa)  
-
-### 8.4 Astrological Features
+### 8.3 Astrological Features
 - Compare with known ephemeris outputs for validation  
+
+### 8.4 Astro Interpretations
+- Qualitative checks on reading coherence; optional human comparison with chart data  
 
 ---
 
@@ -183,12 +178,12 @@ Every stage produces provenance events capturing:
 - Coverage bias: Wikipedia and Wikidata overrepresent notable individuals  
 - Language bias: English‑first enrichment reduces representativeness  
 - Demographic bias: underrepresentation of certain regions/groups  
-- Model bias: embeddings/LLM traits inherit training data biases  
+- Model bias: embeddings and LLM-generated interpretations inherit training data biases  
 
 ---
 
 ## 10. Ethical Considerations
-- Trait inference is speculative and should not be used for clinical or high‑stakes decisions  
+- Astro interpretations are model-generated and should not be used for clinical or high‑stakes decisions  
 - Ensure responsible disclosure of limitations when presenting results  
 - Respect data licensing and privacy constraints  
 
@@ -199,15 +194,15 @@ Every stage produces provenance events capturing:
 - Resolved QIDs  
 - Enriched biographies  
 - Embeddings computed  
-- Traits scored  
 - Astro features computed  
+- Astro interpretations computed  
 
 These metrics serve as **population coverage indicators**, not quality metrics.
 
 ---
 
 ## 12. Conclusion
-Astro‑Reason provides an auditable, reproducible pipeline that converts structured biographical records into semantic and trait representations. Its scientific utility depends on explicit documentation of model choices, provenance, and bias mitigation. With appropriate validation, the pipeline can support computational social science and NLP investigations at scale.
+Astro‑Reason provides an auditable, reproducible pipeline that converts structured biographical records into semantic and astrological representations. Its scientific utility depends on explicit documentation of model choices, provenance, and bias mitigation. With appropriate validation, the pipeline can support computational social science and NLP investigations at scale.
 
 ---
 

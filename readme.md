@@ -2,7 +2,7 @@
 
 Astro-Reason is a research-oriented pipeline for evaluating whether statistically meaningful correlations exist between birth chart configurations and semantic embeddings derived from biographical text.
 
-The system computes semantic embeddings from biographies and compares those vectors against encoded astrological features. Trait vectors (Yuri Burlan’s System-Vector Psychology) are still produced for interpretability and auxiliary analysis.
+The system computes semantic embeddings from biographies and compares those vectors against encoded astrological features. An LLM interprets birth charts into short astrological readings stored for semantic comparison with biographies.
 
 ---
 
@@ -13,11 +13,9 @@ Astrology claims that birth circumstances influence personality. Modern psycholo
 The system:
 
 1. Ingests and enriches biographical datasets (AstroDatabank C-sample + Wikipedia).
-2. Performs NLP analysis to derive:
-   - **Yuri Burlan 8-vector personality profile** using a local LLM
-   - **Semantic embeddings** to capture broader personality “vibe”
-3. Encodes birth charts into **numeric astro features**
-4. Applies statistical correlation and modeling to evaluate alignment (embeddings ↔ astro features)
+2. Performs NLP analysis to derive **semantic embeddings** from biography text.
+3. Encodes birth charts into **numeric astro features** and **LLM-generated astrological readings**.
+4. Applies statistical correlation and modeling to evaluate alignment (embeddings ↔ astro features); readings are stored for future semantic comparison.
 
 The purpose is not advocacy for astrology, but scientific measurement of potential structure that may link symbolic birth data to observable psychological traits.
 
@@ -33,15 +31,13 @@ AstroDatabank XML
  person_raw + birth
         ↓ Wikipedia enrichment
       bio_text
-   ┌─────────────┬──────────────────┐
-   ↓ NLP: LLM scoring               ↓ NLP: embeddings
-  nlp_vectors (8D Burlan)        embeddings (semantic)
-                                   ↓
-                         stats correlation (async)
-        ↓
-Astrological encoding (ephemeris)
- astro_features (numeric)
-        ↓
+        ↓ NLP: embeddings              Astrological encoding (ephemeris)
+  embeddings (semantic)                astro_features (numeric)
+        ↓                                      ↓
+        │                              Astro interpreter (LLM)
+        │                              astro_interpretations (readings)
+        ↓                                      ↓
+  stats correlation (async) ←──────────────────┘
 Stats + correlation visualization
 ```
 
@@ -56,14 +52,11 @@ Resolver service (no queue; DB polling) takes name + date of birth → resolves 
 Embeddings (semantic) – topic: `embeddings`:
 After wiki enrichment, the `fetch-bio` service enqueues batched jobs on the `embeddings` Kafka topic → Python embeddings worker pulls from `embeddings` → computes sentence-transformer embeddings → stores vectors in `embeddings_*` tables in PostgreSQL.
 
-Yuri Burlan scoring (traits) – topic: `traits`:
-The traits worker is implemented (Kotlin + local LLM) and listens on the `traits` Kafka topic; after wiki enrichment, `fetch-bio` enqueues `"traits.score_person"` jobs for each enriched person, and the worker reads biography text from `bio_text` and writes 8‑vector traits into `nlp_vectors`.
-
-Astrological encoding / astro features – topic: `astro`:
-The astro worker consumes `"astro.compute_features"` jobs from Kafka, computes ephemeris‑based features (Swiss Ephemeris with Skyfield fallback) and stores structured astro features + a flat numeric feature vector in `astro_features`.
+Astrological encoding – topic: `astro`:
+The astro worker consumes `"astro.compute_features"` jobs from Kafka, computes ephemeris‑based features (Swiss Ephemeris with Skyfield fallback) and stores structured astro features + a flat numeric feature vector in `astro_features`. After each successful write, it enqueues `"astro.interpret"` jobs on the same topic. The astro interpreter worker (Python, consumer group `astro-interpreter`) consumes those, calls the LLM to produce a short astrological reading from the chart data, and stores the result in `astro_interpretations`.
 
 Storage & analysis:
-All along, PostgreSQL is the source of truth for people, births, bios, traits, embeddings, and astro features. Kafka is used as the job queue between steps (`default` → ingest, `embeddings` for semantic vectors after wiki enrichment, `traits` for Burlan scoring, `stats` for correlation jobs). From there you can query/visualize/analyze whenever you like.
+PostgreSQL is the source of truth for people, births, bios, embeddings, astro features, and astro interpretations. Kafka is used as the job queue (`default` → ingest, `embeddings` after wiki enrichment, `astro` for features and interpretations, `stats` for correlation jobs). Correlation uses embeddings ↔ astro feature_vec; interpretations are stored for future semantic comparison with biography embeddings.
 
 
 ### System Components
@@ -71,8 +64,8 @@ All along, PostgreSQL is the source of truth for people, births, bios, traits, e
 | Component | Description |
 |----------|-------------|
 | API (Kotlin/Ktor) | Uploads, triggers jobs, serves results |
-| Worker | NLP + astro computation jobs |
-| **Ollama** (local LLM) | Burlan vector scoring with controlled JSON output |
+| Worker | Ingest, astro computation, astro interpreter |
+| **Ollama** (local LLM) | Astrological reading generation from chart data |
 | Embeddings service | Semantic vector creation (BGE models) |
 | Stats worker | Async embeddings ↔ astro correlation jobs |
 | PostgreSQL + pgvector | Data and vector storage |
@@ -82,45 +75,14 @@ All along, PostgreSQL is the source of truth for people, births, bios, traits, e
 
 ---
 
-## Personality Model
-
-The personality engine scores biographies on Yuri Burlan’s **8 vectors**:
-
-- sound
-- visual
-- oral
-- anal
-- urethral
-- skin
-- muscular
-- olfactory
-
-Output example:
-
-```json
-{
-  "vectors": { "sound": 6, "visual": 4, "oral": 4, "anal": 3, "urethral": 4, "skin": 4, "muscular": 3, "olfactory": 4 },
-  "dominant": ["sound"],
-  "rationale": { "...": "..." },
-  "confidence": 0.62,
-  "provider": "ollama",
-  "model_name": "qwen2.5:7b-instruct-q4_K_M",
-  "prompt_hash": "sha256..."
-}
-```
-
-These structured, interpretable vectors allow direct comparison against astrological archetypal features.
-
----
-
 ## Database Schema (Core Tables)
 
 - `person_raw` — identity & XML reference
 - `birth` — date/time/location data
 - `bio_text` — enriched biography metadata
-- `nlp_vectors` — Burlan vector scoring results
-- `embeddings` — semantic text embeddings
+- `embeddings_*` — semantic text embeddings (pgvector)
 - `astro_features` — numeric planetary/house/aspect features
+- `astro_interpretations` — LLM-generated astrological readings per person
 - `provenance_event` — process audit tracking
 
 ---
@@ -140,10 +102,10 @@ docker compose up -d --build
 
 ### Kafka topics (required)
 
-The pipeline expects the `traits`, `embeddings`, and `stats` topics to exist. Create them once:
+The pipeline expects the `default`, `embeddings`, `astro`, and `stats` topics to exist. Create them once:
 
 ```bash
-docker compose exec -T kafka rpk topic create traits
+docker compose exec -T kafka rpk topic create default
 docker compose exec -T kafka rpk topic create embeddings
 docker compose exec -T kafka rpk topic create astro
 docker compose exec -T kafka rpk topic create stats
@@ -163,21 +125,13 @@ docker exec -it <local-llm-container-name> ollama pull qwen2.5:7b-instruct-q4_K_
 
 Note: Ollama models are stored in the `ollama` Docker volume. You only need to
 pull the model once unless you remove volumes (for example, `docker compose down -v`
-or deleting the `ollama` volume).
+or deleting the `ollama` volume). Ollama is used by the astro interpreter worker to generate astrological readings from chart data.
 
 Test:
 
 ```bash
 curl http://localhost:8001/api/tags
 ```
-
-### Worker test (LLM scoring)
-
-```bash
-docker compose run --rm worker python -m app.worker_main
-```
-
-Expected: valid JSON Burlan scoring.
 
 ---
 
@@ -186,9 +140,8 @@ Expected: valid JSON Burlan scoring.
 1. Upload AstroDatabank dataset via frontend or API
 2. Trigger enrichment (Wikipedia fetch)
 3. Run batch processing:
-   - Embeddings
-   - Burlan vectors
-   - Astro encoding
+   - Embeddings (after fetch-bio enqueues)
+   - Astro encoding (ingest enqueues); astro interpreter runs after features are written
 
 Each processing step logs a provenance record for reproducibility.
 
@@ -201,7 +154,7 @@ Grafana dashboards are provisioned automatically from `grafana/` when you run
 PostgreSQL datasource points at the local `db` container.
 
 Dashboards:
-- `Pipeline Observability` provides counts for people, traits, embeddings, astro
+- `Pipeline Observability` provides counts for people, embeddings, astro
   features, and correlation placeholders, plus throughput and stuck-job views.
 
 Alerts:

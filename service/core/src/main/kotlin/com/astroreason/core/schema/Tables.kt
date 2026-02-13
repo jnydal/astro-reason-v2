@@ -139,35 +139,6 @@ object BioText : Table("bio_text") {
     override val primaryKey = PrimaryKey(personId, revId)
 }
 
-object NlpTraits : UUIDTable("nlp_traits", columnName = "person_id") {
-    val model = text("model").nullable()
-    val version = text("version").nullable()
-    val scoresJson = jsonb("scores_json").nullable()
-    val rationaleJson = jsonb("rationale_json").nullable()
-    val promptHash = text("prompt_hash").nullable()
-    val createdAt = timestamp("created_at").defaultExpression(CurrentTimestamp())
-    
-    init {
-        id.references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
-    }
-}
-
-object NlpVectors : LongIdTable("nlp_vectors") {
-    val personId = uuid("person_id").references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
-    val vectors = jsonb("vectors")
-    val dominant = text("dominant") // PostgreSQL array stored as text
-    val confidence = double("confidence")
-    val modelName = text("model_name")
-    val provider = text("provider")
-    val temperature = double("temperature")
-    val promptHash = text("prompt_hash")
-    val createdAt = timestamp("created_at").defaultExpression(CurrentTimestamp())
-    
-    init {
-        check { confidence greaterEq 0.0 and (confidence lessEq 1.0) }
-    }
-}
-
 object AstroFeatures : UUIDTable("astro_features", columnName = "person_id") {
     val system = text("system")
     val jdUtc = double("jd_utc")

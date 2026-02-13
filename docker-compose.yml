@@ -66,33 +66,6 @@ services:
         condition: service_started
     entrypoint: [ "java", "-cp", "/app/lib/*", "com.astroreason.api.stats.CorrelationWorkerKt" ]
 
-  # Traits processor (LLM + storages)
-  traits:
-    build:
-      context: .
-      dockerfile: ./service/traits/Dockerfile
-    env_file: ./.env
-    environment:
-      <<: *default-env
-      PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
-      KAFKA_GROUP_ID: ${KAFKA_TRAITS_GROUP_ID:-traits-worker}
-      OLLAMA_URL: ${OLLAMA_URL:-http://local-llm:11434}
-      LLM_MODEL: ${LLM_MODEL:-qwen2.5:7b-instruct-q4_K_M}
-      KAFKA_MAX_POLL_INTERVAL_MS: ${KAFKA_MAX_POLL_INTERVAL_MS:-3600000}
-    depends_on:
-      db:        { condition: service_healthy }
-      kafka:     { condition: service_healthy }
-      local-llm: { condition: service_healthy }
-      bootstrap: { condition: service_completed_successfully }
-    healthcheck:
-      test: ["CMD-SHELL", "ps aux | grep -q '[t]raits'"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    restart: unless-stopped
-
   worker-ingest:
     build:
       context: .
@@ -142,7 +115,6 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
       PORT: 8002
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
-      KAFKA_TRAITS_TOPIC: ${KAFKA_TRAITS_TOPIC:-traits}
       KAFKA_EMBEDDINGS_TOPIC: ${KAFKA_EMBEDDINGS_TOPIC:-embeddings}
     ports:
       - "8002:8002"
@@ -169,6 +141,29 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      kafka:
+        condition: service_started
+
+  astro-interpreter:
+    build:
+      context: .
+      dockerfile: ./service/worker_astro_interpret/Dockerfile
+    env_file: ./.env
+    environment:
+      PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      KAFKA_GROUP_ID: ${KAFKA_ASTRO_INTERPRETER_GROUP_ID:-astro-interpreter}
+      KAFKA_ASTRO_TOPIC: ${KAFKA_ASTRO_TOPIC:-astro}
+      OLLAMA_URL: ${OLLAMA_URL:-http://local-llm:11434}
+      LLM_MODEL: ${LLM_MODEL:-qwen2.5:7b-instruct-q4_K_M}
+    depends_on:
+      db:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      local-llm:
+        condition: service_healthy
+    restart: unless-stopped
 
   # Postgres with pgvector extension baked in
   db:

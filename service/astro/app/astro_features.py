@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import math
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, time as dtime
 from typing import Dict, List, Tuple, Optional
@@ -498,7 +499,7 @@ def _consume_loop():
         raise RuntimeError("Install 'pyswisseph' (preferred) or 'skyfield' to compute astro features.")
 
     backend = "swisseph" if _BACKEND == "swisseph" else "skyfield"
-    from confluent_kafka import Consumer
+    from confluent_kafka import Consumer, Producer
     consumer = Consumer(
         {
             "bootstrap.servers": KAFKA_BOOTSTRAP,
@@ -506,6 +507,7 @@ def _consume_loop():
             "auto.offset.reset": "earliest",
         }
     )
+    producer = Producer({"bootstrap.servers": KAFKA_BOOTSTRAP, "client.id": "astro-worker"})
     consumer.subscribe([KAFKA_TOPIC])
 
     print(f"Astro worker listening on Kafka topic '{KAFKA_TOPIC}'...")
@@ -535,6 +537,7 @@ def _consume_loop():
                 _update_job_status(job_id, "STARTED")
                 wrote = 0
                 skipped = 0
+                written_person_ids = []
 
                 with pg_conn() as conn, pg_cursor(conn) as cur:
                     for person_id in person_ids:
@@ -544,6 +547,27 @@ def _consume_loop():
                             continue
                         _compute_and_store(cur, row, backend=backend)
                         wrote += 1
+                        written_person_ids.append(person_id)
+
+                # Enqueue astro.interpret for each person we wrote (interpreter worker consumes from same topic)
+                now_ms = int(time.time() * 1000)
+                for pid in written_person_ids:
+                    interpret_job_id = str(uuid.uuid4())
+                    interpret_job = {
+                        "id": interpret_job_id,
+                        "function": "astro.interpret",
+                        "args": [pid],
+                        "kwargs": {},
+                        "status": "QUEUED",
+                        "enqueuedAt": now_ms,
+                        "startedAt": None,
+                        "endedAt": None,
+                        "result": None,
+                        "excInfo": None,
+                    }
+                    producer.produce(KAFKA_TOPIC, key=interpret_job_id.encode("utf-8"), value=json.dumps(interpret_job))
+                if written_person_ids:
+                    producer.flush()
 
                 result = {"status": "ok", "count": wrote, "skipped": skipped}
                 _update_job_status(job_id, "FINISHED", result=json.dumps(result))
@@ -554,6 +578,7 @@ def _consume_loop():
                 print(f"Astro job failed: {exc}")
     finally:
         consumer.close()
+        producer.flush()
 
 
 if __name__ == "__main__":

@@ -97,29 +97,38 @@ Embeddings worker processes jobs automatically:
 docker compose logs -f embeddings
 ```
 
-### Step 4: Score Traits
+### Step 4: Compute Astro Features
 
-**Current State**: Traits jobs are enqueued by the fetch-bio service after biographies are written.
-
-**Manual Trigger** (optional):
-```bash
-# Enqueue a traits job directly via Kafka
-docker compose exec kafka /opt/bitnami/kafka/bin/kafka-console-producer.sh \
-  --bootstrap-server localhost:9092 --topic traits <<'EOF'
-{"id":"<job-uuid>","function":"traits.score_person","args":["person-uuid"],"kwargs":{},"status":"QUEUED","enqueuedAt":0,"startedAt":null,"endedAt":null,"result":null,"excInfo":null}
-EOF
-```
-
-### Step 5: Compute Astro Features
-
-Astro service runs automatically:
-- Finds people without `astro_features`
-- Computes astrological features
+Astro service runs automatically when ingest enqueues `astro.compute_features` jobs:
+- Consumes from `astro` topic (group: astro-worker)
+- Computes astrological features from birth data
 - Stores in `astro_features` table
+- Enqueues `astro.interpret` jobs on the same topic
 
 **Monitor**:
 ```bash
 docker compose logs -f astro
+```
+
+### Step 5: Astro Interpreter
+
+Astro interpreter worker runs automatically when astro service produces `astro.interpret` jobs:
+- Consumes from `astro` topic (group: astro-interpreter)
+- Loads chart data from `astro_features`
+- Calls Ollama to generate a short astrological reading
+- Stores in `astro_interpretations` table
+
+**Monitor**:
+```bash
+docker compose logs -f astro-interpreter
+```
+
+**Check interpretations**:
+```sql
+SELECT person_id, LEFT(interpretation_text, 200) AS reading_preview, model_name, created_at
+FROM astro_interpretations
+ORDER BY created_at DESC
+LIMIT 10;
 ```
 
 ### Step 6: Run Correlation Jobs (async)
@@ -155,41 +164,37 @@ SELECT
   COUNT(b.id) as with_birth,
   COUNT(bt.person_id) as with_bio,
   COUNT(e.person_id) as with_embeddings,
-  COUNT(nv.person_id) as with_traits,
-  COUNT(af.person_id) as with_astro
+  COUNT(af.person_id) as with_astro,
+  COUNT(ai.person_id) as with_interpretation
 FROM person_raw pr
 LEFT JOIN birth b ON b.person_id = pr.id
 LEFT JOIN bio_text bt ON bt.person_id = pr.id AND bt.text IS NOT NULL
 LEFT JOIN embeddings_768 e ON e.person_id = pr.id
-LEFT JOIN nlp_vectors nv ON nv.person_id = pr.id
-LEFT JOIN astro_features af ON af.person_id = pr.id;
+LEFT JOIN astro_features af ON af.person_id = pr.id
+LEFT JOIN astro_interpretations ai ON ai.person_id = pr.id;
 ```
 
 ### Find People Ready for Processing
 
 ```sql
--- People with bios but no traits
-SELECT pr.id, pr.name, bt.text
+-- People with astro features but no interpretation yet
+SELECT pr.id, pr.name
 FROM person_raw pr
-JOIN bio_text bt ON bt.person_id = pr.id
-LEFT JOIN nlp_vectors nv ON nv.person_id = pr.id
-WHERE bt.text IS NOT NULL
-  AND nv.person_id IS NULL
+JOIN astro_features af ON af.person_id = pr.id
+LEFT JOIN astro_interpretations ai ON ai.person_id = pr.id
+WHERE ai.person_id IS NULL
 LIMIT 10;
 ```
 
 ### Check Job Queue Status
 
 ```bash
-# Kafka topic offsets and consumer lag
-docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
-  --bootstrap-server localhost:9092 --describe --topic default
-docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
-  --bootstrap-server localhost:9092 --describe --topic embeddings
-docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
-  --bootstrap-server localhost:9092 --describe --topic traits
-docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
-  --bootstrap-server localhost:9092 --describe --topic stats
+# Kafka topic list and describe (Redpanda uses rpk)
+docker compose exec kafka rpk topic list
+docker compose exec kafka rpk topic describe default
+docker compose exec kafka rpk topic describe embeddings
+docker compose exec kafka rpk topic describe astro
+docker compose exec kafka rpk topic describe stats
 ```
 
 ## Troubleshooting
@@ -211,8 +216,7 @@ docker compose exec db pg_isready -U postgres
 
 ```bash
 # Check Kafka connection
-docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
-  --bootstrap-server localhost:9092 --list
+docker compose exec kafka rpk topic list
 
 # Check worker logs
 docker compose logs -f worker-ingest
@@ -348,7 +352,7 @@ ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
 
 ```bash
 # Watch topic status (sample)
-watch -n 5 'docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic default'
+watch -n 5 'docker compose exec kafka rpk topic describe default'
 ```
 
 ## Common Tasks
@@ -364,12 +368,9 @@ TRUNCATE person_raw CASCADE;
 
 Jobs are stored in PostgreSQL (`job_status`). Check failed job IDs and re-enqueue to Kafka if needed.
 
-### Manual Trigger Services
+### Restart Workers
 
 ```bash
-# Trigger astro computation
-docker compose exec astro java -jar app.jar
-
-# Trigger resolver
-docker compose exec resolver java -jar app.jar
+# Astro and astro-interpreter run continuously (Python). Resolver is Kotlin.
+docker compose restart astro astro-interpreter resolver
 ```
