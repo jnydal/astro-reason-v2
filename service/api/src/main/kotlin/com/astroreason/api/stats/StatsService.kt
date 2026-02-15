@@ -14,6 +14,7 @@ import org.apache.commons.math3.ml.distance.EuclideanDistance
 import org.apache.commons.math3.random.JDKRandomGenerator
 import org.apache.commons.math3.stat.correlation.PearsonsCorrelation
 import org.apache.commons.math3.stat.correlation.SpearmansCorrelation
+import org.apache.commons.math3.stat.regression.SimpleRegression
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.select
@@ -31,7 +32,8 @@ private val EMBEDDING_DIM_PREFERENCE = listOf(1024, 768, 384, 1536)
 data class ClusterRow(
     val personId: UUID,
     val embedding: List<Double>,
-    val astro: Map<String, Double>
+    val astro: Map<String, Double>,
+    val birthYear: Int? = null
 )
 
 data class EmbeddingSelection(
@@ -83,13 +85,13 @@ fun loadEmbeddingAstroRows(limit: Int? = null, modelName: String? = null): List<
     }
 }
 
-fun loadEmbeddingAstroRowsForCorrelation(limit: Int? = null): EmbeddingSelection {
+fun loadEmbeddingAstroRowsForCorrelation(limit: Int? = null, withBirthYear: Boolean = false): EmbeddingSelection {
     return transaction(DatabaseManager.getDatabase()) {
         val selectedDim = EMBEDDING_DIM_PREFERENCE.firstOrNull { dim ->
             embeddingTableHasRows(dim)
         } ?: return@transaction EmbeddingSelection(0, emptyList())
 
-        val rows = loadEmbeddingAstroRowsForDim(selectedDim, limit, modelName = null)
+        val rows = loadEmbeddingAstroRowsForDim(selectedDim, limit, modelName = null, withBirthYear = withBirthYear)
         EmbeddingSelection(selectedDim, rows)
     }
 }
@@ -309,10 +311,35 @@ private fun embeddingTableHasRows(dim: Int): Boolean {
     return query.firstOrNull() != null
 }
 
+/**
+ * Detrends embeddings by birth year: for each dimension, fits
+ * embedding_dim = β₀ + β₁ × birth_year and returns residuals.
+ * Rows must all have non-null birthYear; otherwise returns original embeddings unchanged.
+ */
+fun detrendEmbeddingsByBirthYear(rows: List<ClusterRow>): List<List<Double>> {
+    if (rows.isEmpty() || rows.any { it.birthYear == null }) return rows.map { it.embedding }
+    val dims = rows.first().embedding.size
+    if (dims == 0) return rows.map { it.embedding }
+    val regression = SimpleRegression()
+    return (0 until dims).map { d ->
+        regression.clear()
+        rows.forEach { r ->
+            regression.addData(r.birthYear!!.toDouble(), r.embedding.getOrNull(d) ?: 0.0)
+        }
+        rows.map { row ->
+            val pred = regression.slope * row.birthYear!! + regression.intercept
+            (row.embedding.getOrNull(d) ?: 0.0) - pred
+        }
+    }.let { byDim ->
+        (0 until rows.size).map { i -> byDim.map { it[i] } }
+    }
+}
+
 private fun loadEmbeddingAstroRowsForDim(
     dim: Int,
     limit: Int? = null,
-    modelName: String? = null
+    modelName: String? = null,
+    withBirthYear: Boolean = false
 ): List<ClusterRow> {
     val (personCol, modelCol, vectorCol, updatedCol, tableName) = when (dim) {
         1024 -> EmbeddingColumns(
@@ -330,29 +357,51 @@ private fun loadEmbeddingAstroRowsForDim(
         else -> return emptyList()
     }
 
-    val query = when (tableName) {
+    val baseJoin = when (tableName) {
         Embeddings1024.tableName -> Embeddings1024
         Embeddings768.tableName -> Embeddings768
         Embeddings384.tableName -> Embeddings384
         Embeddings1536.tableName -> Embeddings1536
         else -> return emptyList()
+    }.join(AstroFeatures, org.jetbrains.exposed.sql.JoinType.INNER, personCol, AstroFeatures.id)
+
+    val query = if (withBirthYear) {
+        baseJoin
+            .join(Birth, org.jetbrains.exposed.sql.JoinType.INNER, AstroFeatures.id, Birth.id)
+            .slice(personCol, modelCol, vectorCol, updatedCol, AstroFeatures.featureVec, Birth.date)
+            .select { if (modelName != null) modelCol eq modelName else modelCol.isNotNull() }
+            .orderBy(updatedCol, SortOrder.DESC_NULLS_LAST)
+    } else {
+        baseJoin
+            .slice(personCol, modelCol, vectorCol, updatedCol, AstroFeatures.featureVec)
+            .select { if (modelName != null) modelCol eq modelName else modelCol.isNotNull() }
+            .orderBy(updatedCol, SortOrder.DESC_NULLS_LAST)
     }
-        .join(AstroFeatures, org.jetbrains.exposed.sql.JoinType.INNER, personCol, AstroFeatures.id)
-        .slice(personCol, modelCol, vectorCol, updatedCol, AstroFeatures.featureVec)
-        .select { if (modelName != null) modelCol eq modelName else modelCol.isNotNull() }
-        .orderBy(updatedCol, SortOrder.DESC_NULLS_LAST)
 
     if (limit != null) {
         query.limit(limit)
     }
 
-    val rows = query.mapNotNull { row ->
-        val embedding = parsePgVector(row[vectorCol])
-        val astro = parseDoubleMap(row[AstroFeatures.featureVec])
-        if (embedding.isEmpty() || astro.isEmpty()) {
-            null
-        } else {
-            ClusterRow(row[personCol], embedding, astro)
+    val rows = if (withBirthYear) {
+        query.mapNotNull { row ->
+            val embedding = parsePgVector(row[vectorCol])
+            val astro = parseDoubleMap(row[AstroFeatures.featureVec])
+            val birthDate = row[Birth.date]
+            if (embedding.isEmpty() || astro.isEmpty() || birthDate == null) {
+                null
+            } else {
+                ClusterRow(row[personCol], embedding, astro, birthYear = birthDate.year)
+            }
+        }
+    } else {
+        query.mapNotNull { row ->
+            val embedding = parsePgVector(row[vectorCol])
+            val astro = parseDoubleMap(row[AstroFeatures.featureVec])
+            if (embedding.isEmpty() || astro.isEmpty()) {
+                null
+            } else {
+                ClusterRow(row[personCol], embedding, astro)
+            }
         }
     }
 

@@ -56,7 +56,7 @@ Astrological encoding – topic: `astro`:
 The astro worker consumes `"astro.compute_features"` jobs from Kafka, computes ephemeris‑based features (Swiss Ephemeris with Skyfield fallback) and stores structured astro features + a flat numeric feature vector in `astro_features`. After each successful write, it enqueues `"astro.interpret"` jobs on the same topic. The astro interpreter worker (Python, consumer group `astro-interpreter`) consumes those, calls the LLM to produce a short astrological reading from the chart data, and stores the result in `astro_interpretations`.
 
 Storage & analysis:
-PostgreSQL is the source of truth for people, births, bios, embeddings, astro features, and astro interpretations. Kafka is used as the job queue (`default` → ingest, `embeddings` after wiki enrichment, `astro` for features and interpretations, `stats` for correlation jobs). Correlation uses embeddings ↔ astro feature_vec; interpretations are stored for future semantic comparison with biography embeddings.
+PostgreSQL is the source of truth for people, births, bios, embeddings, astro features, and astro interpretations. Kafka is used as the job queue (`default` → ingest, `embeddings` after wiki enrichment, `astro` for features and interpretations, `stats` for correlation jobs). Correlation uses embeddings ↔ astro feature_vec; interpretations are stored for future semantic comparison with biography embeddings. For astro-features mode, the stats worker also computes correlations on **birth-year–detrended** embeddings (linear regression residuals per dimension) so you can compare `featureImportance` (original) with `featureImportanceDetrended` and distinguish real astrological signals from spurious cohort effects (e.g. slow-moving outer planets acting as generation proxies).
 
 
 ### System Components
@@ -67,7 +67,7 @@ PostgreSQL is the source of truth for people, births, bios, embeddings, astro fe
 | Worker | Ingest, astro computation, astro interpreter |
 | **Ollama** (local LLM) | Astrological reading generation from chart data |
 | Embeddings service | Semantic vector creation (BGE models) |
-| Stats worker | Async embeddings ↔ astro correlation jobs |
+| Stats worker | Async embeddings ↔ astro correlation jobs (original + birth-year detrended) |
 | PostgreSQL + pgvector | Data and vector storage |
 | Kafka | Job queue |
 | MinIO | Raw biography text object storage |

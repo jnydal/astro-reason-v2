@@ -1,6 +1,6 @@
 High: hardcoded default credentials — docker-compose.yml includes defaults like postgres, minio123, admin. Fine for local dev, risky if reused in production.
 Gaps and coherence risks
-Stats/correlation service: Implemented as an async Kafka worker with DB summary + S3 full results; monitor throughput and storage costs as dataset scales.
+Stats/correlation service: Implemented as an async Kafka worker with DB summary + S3 full results; monitor throughput and storage costs as dataset scales. Birth-year detrending is implemented for astro-features mode (linear regression residuals per embedding dimension) so results include both `featureImportance` (original) and `featureImportanceDetrended` for comparing real astro signals vs cohort effects.
 
 
 

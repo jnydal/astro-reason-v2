@@ -146,7 +146,8 @@ This enqueues one `astro.interpret` job per person who has both embeddings and a
 
 The stats worker processes correlation jobs:
 - Reads from `stats` topic
-- Computes embeddings ↔ astro correlations
+- Computes embeddings ↔ astro correlations (default mode: astro features)
+- For **features** mode: also computes correlations on **birth-year–detrended** embeddings (linear regression residuals per dimension) so you can separate real astro signals from cohort effects (e.g. outer planets as generation proxies)
 - Stores summary in `job_status` and full JSON in MinIO/S3
 
 **Enqueue**:
@@ -159,9 +160,19 @@ curl http://localhost:8000/stats/correlation
 curl http://localhost:8000/stats/correlation/<jobId>
 ```
 
+The result includes:
+- **`featureImportance`** — mean absolute Pearson correlation of each astro feature with **original** embedding dimensions
+- **`featureImportanceDetrended`** — same, but using **detrended** embeddings (residuals after regressing each dimension on birth year). Only present when mode is `features` and all loaded rows have a birth date. Compare the two lists: features that drop sharply in the detrended list may be driven by birth-year/cohort rather than astrological structure.
+
 **Monitor**:
 ```bash
 docker compose logs -f stats-worker
+```
+
+After a code change to the stats worker (e.g. detrending logic), rebuild and restart so new jobs use the new code:
+```bash
+docker compose build --no-cache stats-worker
+docker compose up -d stats-worker
 ```
 
 ## Database Queries

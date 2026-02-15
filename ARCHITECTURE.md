@@ -66,8 +66,8 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 
 7. Stats Worker (Kotlin)
    ├─→ Reads from Kafka (stats topic)
-   ├─→ Computes embeddings ↔ astro correlations
-   ├─→ Stores summary in job_status
+   ├─→ Computes embeddings ↔ astro correlations (original + birth-year detrended)
+   ├─→ Stores summary in job_status (featureImportance + featureImportanceDetrended)
    └─→ Writes full results to MinIO/S3
 ```
 
@@ -111,8 +111,8 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - `GET /version` - Version information
 - `POST /ingest/astrodatabank` - Upload XML file
 - `GET /jobs/{jobId}` - Get job status
-- `GET /stats/correlation` - Enqueue correlation job
-- `GET /stats/correlation/{jobId}` - Fetch correlation result/status
+- `GET /stats/correlation` - Enqueue correlation job (default mode: astro features; optional `?mode=interpretations`)
+- `GET /stats/correlation/{jobId}` - Fetch correlation result/status. Result includes `featureImportance` (original) and, for features mode, `featureImportanceDetrended` (after birth-year detrending)
 
 **Dependencies**: Database, Kafka, MinIO
 
@@ -213,6 +213,10 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 **Queue**: `stats`  
 **Responsibilities**:
 - Compute embeddings ↔ astro correlations asynchronously
+- **Birth-year detrending** (astro-features mode only): for each embedding dimension, fit linear regression on birth year and use residuals so correlations are not confounded by cohort/generation. Enables comparison of:
+  - **Real astrological signals** — planetary positions correlating with biography content independent of when someone was born
+  - **Spurious cohort effects** — slow-moving outer planets (e.g. Pluto, Neptune, Uranus) acting as proxies for generation/era, which naturally correlate with biography style and content
+- Output two feature-importance lists: `featureImportance` (original embeddings) and `featureImportanceDetrended` (residuals after removing birth-year trend). Only people with a known birth date (join to `birth` table) are included so both analyses use the same sample.
 - Store summary in `job_status.result`
 - Persist full correlation JSON to MinIO/S3 and return signed URLs
 

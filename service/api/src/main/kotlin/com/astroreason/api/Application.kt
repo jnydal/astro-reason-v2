@@ -41,6 +41,7 @@ fun Application.module() {
             prettyPrint = true
             isLenient = true
             ignoreUnknownKeys = true
+            encodeDefaults = true
         })
     }
     val json = Json { ignoreUnknownKeys = true; isLenient = true }

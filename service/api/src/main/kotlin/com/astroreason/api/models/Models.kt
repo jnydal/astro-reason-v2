@@ -58,7 +58,10 @@ data class CorrelationResponse(
 data class CorrelationJobResult(
     val embeddingDim: Int,
     val astroFeatureOrder: List<String>,
+    /** Original embeddings vs astro (backward compatible). */
     val featureImportance: List<FeatureImportanceEntry>,
+    /** After detrending embeddings by birth year (removes cohort proxy). */
+    val featureImportanceDetrended: List<FeatureImportanceEntry>? = null,
     val s3Uri: String? = null
 )
 

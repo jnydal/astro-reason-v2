@@ -31,7 +31,7 @@ fun main() {
         println("Shutdown signal received, stopping stats worker...")
     })
 
-    println("Stats worker started, listening for jobs...")
+    println("Stats worker started (with birth-year detrending), listening for jobs...")
     var idleBackoffMs = 100L
 
     while (running.get()) {
@@ -49,31 +49,60 @@ fun main() {
 
                         val selection = when (mode) {
                             "interpretations" -> loadEmbeddingInterpretationRowsForCorrelation(limit)
-                            else -> loadEmbeddingAstroRowsForCorrelation(limit)
+                            else -> loadEmbeddingAstroRowsForCorrelation(limit, withBirthYear = true)
                         }
+                        val allHaveBirthYear = selection.rows.isNotEmpty() && selection.rows.all { it.birthYear != null }
+                        println("stats.correlation: mode=$mode, rows=${selection.rows.size}, allHaveBirthYear=$allHaveBirthYear")
+
                         val correlation = buildEmbeddingCorrelationResponse(
                             rows = selection.rows,
                             embeddingDim = selection.embeddingDim,
                             minSamples = minSamples
                         )
-                        val featureImportance = buildFeatureImportanceFromCorrelation(correlation)
+                        val featureImportanceOriginal = buildFeatureImportanceFromCorrelation(correlation)
 
-                        val s3Uri = if (correlation.rows.isNotEmpty()) {
-                            val correlationJson = json.encodeToString(correlation)
-                            storage.putBytes(
-                                namespace = "stats-correlation",
-                                content = correlationJson.toByteArray(),
-                                contentType = "application/json",
-                                extension = "json"
+                        val (featureImportanceDetrended, s3Uri) = if (mode == "features" && selection.rows.isNotEmpty() && allHaveBirthYear) {
+                            val detrended = detrendEmbeddingsByBirthYear(selection.rows)
+                            val rowsDetrended = selection.rows.zip(detrended).map { (row, res) ->
+                                ClusterRow(row.personId, res, row.astro, row.birthYear)
+                            }
+                            val correlationDetrended = buildEmbeddingCorrelationResponse(
+                                rows = rowsDetrended,
+                                embeddingDim = selection.embeddingDim,
+                                minSamples = minSamples
                             )
+                            val detrendedFi = buildFeatureImportanceFromCorrelation(correlationDetrended)
+                            println("stats.correlation: featureImportanceDetrended computed (${detrendedFi.entries.size} entries)")
+                            val uri = if (correlation.rows.isNotEmpty()) {
+                                val correlationJson = json.encodeToString(correlation)
+                                storage.putBytes(
+                                    namespace = "stats-correlation",
+                                    content = correlationJson.toByteArray(),
+                                    contentType = "application/json",
+                                    extension = "json"
+                                )
+                            } else null
+                            detrendedFi.entries to uri
                         } else {
-                            null
+                            if (mode == "features" && selection.rows.isNotEmpty()) {
+                                println("stats.correlation: featureImportanceDetrended skipped (allHaveBirthYear=$allHaveBirthYear)")
+                            }
+                            null to if (correlation.rows.isNotEmpty()) {
+                                val correlationJson = json.encodeToString(correlation)
+                                storage.putBytes(
+                                    namespace = "stats-correlation",
+                                    content = correlationJson.toByteArray(),
+                                    contentType = "application/json",
+                                    extension = "json"
+                                )
+                            } else null
                         }
 
                         val result = CorrelationJobResult(
                             embeddingDim = correlation.embeddingDim,
                             astroFeatureOrder = correlation.astroFeatureOrder,
-                            featureImportance = featureImportance.entries,
+                            featureImportance = featureImportanceOriginal.entries,
+                            featureImportanceDetrended = featureImportanceDetrended,
                             s3Uri = s3Uri
                         )
                         jobQueue.updateStatus(job.id, JobStatus.FINISHED, result = json.encodeToString(result))
