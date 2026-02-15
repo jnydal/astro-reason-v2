@@ -294,6 +294,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - `KAFKA_BOOTSTRAP_SERVERS` - Kafka connection
 - `MINIO_*` - Object storage configuration
 - `OLLAMA_URL` - LLM service URL
+- `OLLAMA_TIMEOUT` - Read timeout in seconds for Ollama API (default 300)
 - `LLM_MODEL` - Model name for astro interpreter (astrological reading generation)
 
 ## Scalability Considerations

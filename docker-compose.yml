@@ -155,6 +155,7 @@ services:
       KAFKA_GROUP_ID: ${KAFKA_ASTRO_INTERPRETER_GROUP_ID:-astro-interpreter}
       KAFKA_ASTRO_TOPIC: ${KAFKA_ASTRO_TOPIC:-astro}
       OLLAMA_URL: ${OLLAMA_URL:-http://local-llm:11434}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-300}
       LLM_MODEL: ${LLM_MODEL:-qwen2.5:7b-instruct-q4_K_M}
     depends_on:
       db:

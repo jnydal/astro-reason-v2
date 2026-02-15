@@ -1,7 +1,7 @@
 """
 One-off script: enqueue astro.interpret jobs for all people who have embeddings
-and astro_features (same set as pipeline "embeddings computed" that are ready
-for interpretation). Use this to backfill readings so correlation can run.
+and astro_features but are missing astrological readings (same pipeline-ready
+set as "embeddings computed" that are ready for interpretation).
 
 Run from repo root (with .env or same env as astro-interpreter):
   python -m service.worker_astro_interpret.app.enqueue_interpret
@@ -33,8 +33,8 @@ def _get_dsn() -> str:
     return _normalize_dsn(raw)
 
 
-def _person_ids_with_embeddings_and_astro_features(conn) -> list[str]:
-    """Person IDs that have at least one embedding and astro_features (ready for interpret)."""
+def _person_ids_embeddings_astro_missing_readings(conn) -> list[str]:
+    """Person IDs that have embeddings and astro_features but no astro_interpretations."""
     cur = conn.cursor()
     cur.execute(
         """
@@ -49,6 +49,8 @@ def _person_ids_with_embeddings_and_astro_features(conn) -> list[str]:
             SELECT person_id FROM embeddings_1536
         ) e
         INNER JOIN astro_features af ON af.person_id = e.person_id
+        LEFT JOIN astro_interpretations ai ON ai.person_id = e.person_id
+        WHERE ai.person_id IS NULL
         ORDER BY 1
         """
     )
@@ -67,15 +69,15 @@ def main() -> None:
 
     conn = psycopg2.connect(dsn)
     try:
-        person_ids = _person_ids_with_embeddings_and_astro_features(conn)
+        person_ids = _person_ids_embeddings_astro_missing_readings(conn)
     finally:
         conn.close()
 
     if not person_ids:
-        print("No person_ids found with both embeddings and astro_features. Nothing to enqueue.")
+        print("No person_ids with embeddings and astro_features missing readings. Nothing to enqueue.")
         return
 
-    print(f"Enqueueing astro.interpret for {len(person_ids)} people to topic '{topic}'...")
+    print(f"Enqueueing astro.interpret for {len(person_ids)} people (embeddings+astro, missing readings) to topic '{topic}'...")
 
     producer = Producer({"bootstrap.servers": kafka_bootstrap, "client.id": "enqueue-interpret"})
     now_ms = int(time.time() * 1000)

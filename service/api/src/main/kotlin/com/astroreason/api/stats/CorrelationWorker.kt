@@ -45,8 +45,12 @@ fun main() {
                     "stats.correlation" -> {
                         val limit = job.kwargs["limit"]?.toIntOrNull()
                         val minSamples = job.kwargs["minSamples"]?.toIntOrNull() ?: 3
+                        val mode = job.kwargs["mode"]?.takeIf { it in setOf("features", "interpretations") } ?: "features"
 
-                        val selection = loadEmbeddingAstroRowsForCorrelation(limit)
+                        val selection = when (mode) {
+                            "interpretations" -> loadEmbeddingInterpretationRowsForCorrelation(limit)
+                            else -> loadEmbeddingAstroRowsForCorrelation(limit)
+                        }
                         val correlation = buildEmbeddingCorrelationResponse(
                             rows = selection.rows,
                             embeddingDim = selection.embeddingDim,

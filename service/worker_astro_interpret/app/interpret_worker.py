@@ -26,6 +26,14 @@ OLLAMA_URL = (os.getenv("OLLAMA_URL") or "http://local-llm:11434").rstrip("/")
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen2.5:7b-instruct-q4_K_M")
 
 
+def _ollama_timeout() -> int:
+    raw = os.getenv("OLLAMA_TIMEOUT", "300")
+    try:
+        return max(60, int(raw))
+    except ValueError:
+        return 300
+
+
 def _normalize_dsn(dsn: str) -> str:
     if dsn.startswith("postgresql+psycopg://"):
         return "postgresql://" + dsn[len("postgresql+psycopg://") :]
@@ -37,6 +45,14 @@ def _normalize_dsn(dsn: str) -> str:
 def _get_dsn() -> str:
     raw = os.getenv("PG_DSN") or os.getenv("DATABASE_URL") or ""
     return _normalize_dsn(raw)
+
+
+def _has_interpretation(cur, person_id: str) -> bool:
+    cur.execute(
+        "SELECT 1 FROM astro_interpretations WHERE person_id = %s LIMIT 1",
+        (person_id,),
+    )
+    return cur.fetchone() is not None
 
 
 def _load_chart(cur, person_id: str) -> dict | None:
@@ -85,7 +101,8 @@ def _call_ollama(prompt: str) -> str:
         "prompt": prompt,
         "stream": False,
     }
-    r = requests.post(url, json=payload, timeout=120)
+    timeout = _ollama_timeout()
+    r = requests.post(url, json=payload, timeout=timeout)
     r.raise_for_status()
     data = r.json()
     return (data.get("response") or "").strip()
@@ -116,6 +133,7 @@ def _consume_loop() -> None:
             "bootstrap.servers": KAFKA_BOOTSTRAP,
             "group.id": KAFKA_GROUP_ID,
             "auto.offset.reset": "earliest",
+            "enable.auto.commit": False,
         }
     )
     consumer.subscribe([KAFKA_TOPIC])
@@ -135,12 +153,14 @@ def _consume_loop() -> None:
                 payload = json.loads(msg.value().decode("utf-8"))
                 function = payload.get("function")
                 if function != "astro.interpret":
+                    consumer.commit(message=msg)
                     continue
 
                 args = payload.get("args") or []
                 person_id = (args[0] if args else payload.get("kwargs", {}).get("person_id"))
                 if not person_id:
                     print("astro.interpret: missing person_id")
+                    consumer.commit(message=msg)
                     continue
 
                 person_id = str(person_id)
@@ -149,12 +169,17 @@ def _consume_loop() -> None:
                 conn.autocommit = False
                 cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
                 try:
+                    if _has_interpretation(cur, person_id):
+                        consumer.commit(message=msg)
+                        continue
+
                     chart = _load_chart(cur, person_id)
                     if not chart:
                         print(f"astro.interpret: no astro_features for person_id={person_id}")
                         conn.rollback()
                         cur.close()
                         conn.close()
+                        consumer.commit(message=msg)
                         continue
 
                     chart_text = _format_chart_for_prompt(chart)
@@ -165,11 +190,13 @@ def _consume_loop() -> None:
                         conn.rollback()
                         cur.close()
                         conn.close()
+                        consumer.commit(message=msg)
                         continue
 
                     _store_interpretation(cur, person_id, interpretation_text)
                     conn.commit()
                     print(f"✅ astro_interpretations: stored for person_id={person_id}")
+                    consumer.commit(message=msg)
                 finally:
                     cur.close()
                     conn.close()
@@ -177,6 +204,7 @@ def _consume_loop() -> None:
                 print(f"Astro interpret job failed: {exc}")
                 import traceback
                 traceback.print_exc()
+                # Do not commit: message will be redelivered for retry
     finally:
         consumer.close()
 

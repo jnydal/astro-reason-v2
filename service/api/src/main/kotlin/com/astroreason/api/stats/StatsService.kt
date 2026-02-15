@@ -94,6 +94,22 @@ fun loadEmbeddingAstroRowsForCorrelation(limit: Int? = null): EmbeddingSelection
     }
 }
 
+/**
+ * Loads (embedding, interpretation-derived features) for correlation.
+ * Joins embeddings with astro_interpretations; each row gets synthetic features
+ * "interpretation" = 1.0 and "interpretation:&lt;modelName&gt;" = 1.0.
+ */
+fun loadEmbeddingInterpretationRowsForCorrelation(limit: Int? = null): EmbeddingSelection {
+    return transaction(DatabaseManager.getDatabase()) {
+        val selectedDim = EMBEDDING_DIM_PREFERENCE.firstOrNull { dim ->
+            embeddingTableHasRows(dim)
+        } ?: return@transaction EmbeddingSelection(0, emptyList())
+
+        val rows = loadEmbeddingInterpretationRowsForDim(selectedDim, limit)
+        EmbeddingSelection(selectedDim, rows)
+    }
+}
+
 fun buildEmbeddingCorrelationResponse(
     rows: List<ClusterRow>,
     embeddingDim: Int,
@@ -336,6 +352,61 @@ private fun loadEmbeddingAstroRowsForDim(
         if (embedding.isEmpty() || astro.isEmpty()) {
             null
         } else {
+            ClusterRow(row[personCol], embedding, astro)
+        }
+    }
+
+    return rows.groupBy { it.personId }.values.mapNotNull { group ->
+        group.firstOrNull()
+    }
+}
+
+private fun loadEmbeddingInterpretationRowsForDim(
+    dim: Int,
+    limit: Int? = null
+): List<ClusterRow> {
+    val (personCol, modelCol, vectorCol, updatedCol, tableName) = when (dim) {
+        1024 -> EmbeddingColumns(
+            Embeddings1024.personId, Embeddings1024.modelName, Embeddings1024.vector, Embeddings1024.updatedAt, Embeddings1024.tableName
+        )
+        768 -> EmbeddingColumns(
+            Embeddings768.personId, Embeddings768.modelName, Embeddings768.vector, Embeddings768.updatedAt, Embeddings768.tableName
+        )
+        384 -> EmbeddingColumns(
+            Embeddings384.personId, Embeddings384.modelName, Embeddings384.vector, Embeddings384.updatedAt, Embeddings384.tableName
+        )
+        1536 -> EmbeddingColumns(
+            Embeddings1536.personId, Embeddings1536.modelName, Embeddings1536.vector, Embeddings1536.updatedAt, Embeddings1536.tableName
+        )
+        else -> return emptyList()
+    }
+
+    val query = when (tableName) {
+        Embeddings1024.tableName -> Embeddings1024
+        Embeddings768.tableName -> Embeddings768
+        Embeddings384.tableName -> Embeddings384
+        Embeddings1536.tableName -> Embeddings1536
+        else -> return emptyList()
+    }
+        .join(AstroInterpretations, org.jetbrains.exposed.sql.JoinType.INNER, personCol, AstroInterpretations.id)
+        .slice(personCol, modelCol, vectorCol, updatedCol, AstroInterpretations.modelName)
+        .select { modelCol.isNotNull() }
+        .orderBy(updatedCol, SortOrder.DESC_NULLS_LAST)
+
+    if (limit != null) {
+        query.limit(limit)
+    }
+
+    val rows = query.mapNotNull { row ->
+        val embedding = parsePgVector(row[vectorCol])
+        val modelName = row[AstroInterpretations.modelName]
+        if (embedding.isEmpty()) {
+            null
+        } else {
+            val astro = buildMap {
+                put("interpretation", 1.0)
+                put("interpretation:$modelName", 1.0)
+            }
             ClusterRow(row[personCol], embedding, astro)
         }
     }

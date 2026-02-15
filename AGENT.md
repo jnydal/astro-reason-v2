@@ -91,6 +91,7 @@ MINIO_BUCKET_RAW=astro-raw
 
 # LLM
 OLLAMA_URL=http://local-llm:11434
+OLLAMA_TIMEOUT=300
 LLM_MODEL=qwen2.5:7b-instruct-q4_K_M
 
 # Embeddings

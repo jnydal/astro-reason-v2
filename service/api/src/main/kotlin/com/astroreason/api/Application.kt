@@ -128,7 +128,8 @@ fun Application.module() {
             get("/correlation") {
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull()
                 val minSamples = call.request.queryParameters["minSamples"]?.toIntOrNull() ?: 3
-                val job = jobQueue.enqueueCorrelation(limit, minSamples)
+                val mode = call.request.queryParameters["mode"]?.takeIf { it in setOf("features", "interpretations") } ?: "features"
+                val job = jobQueue.enqueueCorrelation(limit, minSamples, mode)
                 call.respond(
                     CorrelationJobResponse(
                         jobId = job.id,
@@ -168,7 +169,11 @@ fun Application.module() {
             get("/feature-importance") {
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull()
                 val minSamples = call.request.queryParameters["minSamples"]?.toIntOrNull() ?: 3
-                val selection = loadEmbeddingAstroRowsForCorrelation(limit)
+                val mode = call.request.queryParameters["mode"]?.takeIf { it in setOf("features", "interpretations") } ?: "features"
+                val selection = when (mode) {
+                    "interpretations" -> loadEmbeddingInterpretationRowsForCorrelation(limit)
+                    else -> loadEmbeddingAstroRowsForCorrelation(limit)
+                }
                 if (selection.rows.isEmpty()) {
                     call.respond(FeatureImportanceResponse(entries = emptyList()))
                 } else {

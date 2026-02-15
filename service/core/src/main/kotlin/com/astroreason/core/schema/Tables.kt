@@ -212,6 +212,17 @@ object Embeddings1536 : Table("embeddings_1536") {
     override val primaryKey = PrimaryKey(personId, modelName)
 }
 
+object AstroInterpretations : UUIDTable("astro_interpretations", columnName = "person_id") {
+    val interpretationText = text("interpretation_text")
+    val modelName = text("model_name")
+    val promptHash = text("prompt_hash").nullable()
+    val createdAt = timestamp("created_at").defaultExpression(CurrentTimestamp())
+
+    init {
+        id.references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
+    }
+}
+
 object JobStatusTable : UUIDTable("job_status", columnName = "id") {
     val function = text("function")
     val status = text("status")
