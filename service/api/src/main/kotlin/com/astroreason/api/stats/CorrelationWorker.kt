@@ -1,6 +1,7 @@
 package com.astroreason.api.stats
 
 import com.astroreason.api.models.CorrelationJobResult
+import com.astroreason.api.models.FeatureImportanceEntry
 import com.astroreason.api.storage.createS3Storage
 import com.astroreason.core.Config
 import com.astroreason.core.queue.JobStatus
@@ -61,7 +62,7 @@ fun main() {
                         )
                         val featureImportanceOriginal = buildFeatureImportanceFromCorrelation(correlation)
 
-                        val (featureImportanceDetrended, s3Uri) = if (mode == "features" && selection.rows.isNotEmpty() && allHaveBirthYear) {
+                        val (featureImportanceDetrendedList, s3Uri) = if (mode == "features" && selection.rows.isNotEmpty() && allHaveBirthYear) {
                             val detrended = detrendEmbeddingsByBirthYear(selection.rows)
                             val rowsDetrended = selection.rows.zip(detrended).map { (row, res) ->
                                 ClusterRow(row.personId, res, row.astro, row.birthYear)
@@ -87,7 +88,7 @@ fun main() {
                             if (mode == "features" && selection.rows.isNotEmpty()) {
                                 println("stats.correlation: featureImportanceDetrended skipped (allHaveBirthYear=$allHaveBirthYear)")
                             }
-                            null to if (correlation.rows.isNotEmpty()) {
+                            emptyList<FeatureImportanceEntry>() to if (correlation.rows.isNotEmpty()) {
                                 val correlationJson = json.encodeToString(correlation)
                                 storage.putBytes(
                                     namespace = "stats-correlation",
@@ -102,7 +103,8 @@ fun main() {
                             embeddingDim = correlation.embeddingDim,
                             astroFeatureOrder = correlation.astroFeatureOrder,
                             featureImportance = featureImportanceOriginal.entries,
-                            featureImportanceDetrended = featureImportanceDetrended,
+                            featureImportanceDetrended = featureImportanceDetrendedList,
+                            correlationResultVersion = 2,
                             s3Uri = s3Uri
                         )
                         jobQueue.updateStatus(job.id, JobStatus.FINISHED, result = json.encodeToString(result))

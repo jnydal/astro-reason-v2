@@ -60,8 +60,10 @@ data class CorrelationJobResult(
     val astroFeatureOrder: List<String>,
     /** Original embeddings vs astro (backward compatible). */
     val featureImportance: List<FeatureImportanceEntry>,
-    /** After detrending embeddings by birth year (removes cohort proxy). */
-    val featureImportanceDetrended: List<FeatureImportanceEntry>? = null,
+    /** After detrending embeddings by birth year (empty if skipped or old worker). */
+    val featureImportanceDetrended: List<FeatureImportanceEntry> = emptyList(),
+    /** 2 = worker with detrending; missing or 1 = old worker. */
+    val correlationResultVersion: Int = 1,
     val s3Uri: String? = null
 )
 

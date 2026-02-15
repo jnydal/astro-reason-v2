@@ -169,11 +169,14 @@ The result includes:
 docker compose logs -f stats-worker
 ```
 
-After a code change to the stats worker (e.g. detrending logic), rebuild and restart so new jobs use the new code:
+**Service name**: The correlation worker is the Compose service **`stats-worker`** (not `stats`). The Kafka topic is `stats`. If you run `docker compose restart stats`, nothing happens because no service has that name — use `stats-worker` for logs, restart, and rebuild.
+
+After a code change to the stats worker or the API (e.g. detrending logic, new result fields), rebuild and restart **both** so new jobs use the new code and the API returns the new result shape:
 ```bash
-docker compose build --no-cache stats-worker
-docker compose up -d stats-worker
+docker compose build --no-cache api stats-worker
+docker compose up -d api stats-worker
 ```
+(The API decodes and serves the job result; if only the worker is updated, responses will still lack new fields like `featureImportanceDetrended` and `correlationResultVersion`.)
 
 ## Database Queries
 

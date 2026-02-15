@@ -210,6 +210,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 ### 8. Stats Worker (`service/api` + `CorrelationWorker`)
 
 **Technology**: Kotlin  
+**Compose service name**: `stats-worker` (use this for `logs`, `restart`, `build`; the Kafka topic is `stats`).  
 **Queue**: `stats`  
 **Responsibilities**:
 - Compute embeddings ↔ astro correlations asynchronously

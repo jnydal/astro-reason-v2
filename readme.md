@@ -67,7 +67,7 @@ PostgreSQL is the source of truth for people, births, bios, embeddings, astro fe
 | Worker | Ingest, astro computation, astro interpreter |
 | **Ollama** (local LLM) | Astrological reading generation from chart data |
 | Embeddings service | Semantic vector creation (BGE models) |
-| Stats worker | Async embeddings ↔ astro correlation jobs (original + birth-year detrended) |
+| Stats worker (`stats-worker`) | Async embeddings ↔ astro correlation jobs (original + birth-year detrended) |
 | PostgreSQL + pgvector | Data and vector storage |
 | Kafka | Job queue |
 | MinIO | Raw biography text object storage |
