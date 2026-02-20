@@ -1,0 +1,371 @@
+{
+    "jobId": "33d75e7e-233e-4db5-8d19-5292d596cd01",
+    "status": "finished",
+    "enqueuedAt": "1771167375480",
+    "startedAt": "1771167408364",
+    "endedAt": "1771167443762",
+    "excInfo": null,
+    "result": {
+        "embeddingDim": 1024,
+        "astroFeatureOrder": [
+            "aspect_strength_conjunction",
+            "aspect_strength_opposition",
+            "aspect_strength_sextile",
+            "aspect_strength_square",
+            "aspect_strength_trine",
+            "elem_air",
+            "elem_earth",
+            "elem_fire",
+            "elem_water",
+            "lon_jupiter_cos",
+            "lon_jupiter_sin",
+            "lon_mars_cos",
+            "lon_mars_sin",
+            "lon_mercury_cos",
+            "lon_mercury_sin",
+            "lon_moon_cos",
+            "lon_moon_sin",
+            "lon_neptune_cos",
+            "lon_neptune_sin",
+            "lon_pluto_cos",
+            "lon_pluto_sin",
+            "lon_saturn_cos",
+            "lon_saturn_sin",
+            "lon_sun_cos",
+            "lon_sun_sin",
+            "lon_uranus_cos",
+            "lon_uranus_sin",
+            "lon_venus_cos",
+            "lon_venus_sin",
+            "mod_cardinal",
+            "mod_fixed",
+            "mod_mutable"
+        ],
+        "featureImportance": [
+            {
+                "feature": "lon_pluto_cos",
+                "meanAbsPearson": 0.10057914101502304,
+                "n": 1024
+            },
+            {
+                "feature": "lon_neptune_cos",
+                "meanAbsPearson": 0.0736411247867122,
+                "n": 1024
+            },
+            {
+                "feature": "lon_neptune_sin",
+                "meanAbsPearson": 0.07233345277457592,
+                "n": 1024
+            },
+            {
+                "feature": "lon_pluto_sin",
+                "meanAbsPearson": 0.06714378071949058,
+                "n": 1024
+            },
+            {
+                "feature": "lon_uranus_cos",
+                "meanAbsPearson": 0.04051749954981732,
+                "n": 1024
+            },
+            {
+                "feature": "lon_uranus_sin",
+                "meanAbsPearson": 0.03531778632163626,
+                "n": 1024
+            },
+            {
+                "feature": "aspect_strength_sextile",
+                "meanAbsPearson": 0.03068011795520064,
+                "n": 1024
+            },
+            {
+                "feature": "elem_earth",
+                "meanAbsPearson": 0.028230263934232575,
+                "n": 1024
+            },
+            {
+                "feature": "lon_moon_cos",
+                "meanAbsPearson": 0.027958695945981413,
+                "n": 1024
+            },
+            {
+                "feature": "aspect_strength_trine",
+                "meanAbsPearson": 0.027777424677626627,
+                "n": 1024
+            },
+            {
+                "feature": "lon_mercury_cos",
+                "meanAbsPearson": 0.02722108688510383,
+                "n": 1024
+            },
+            {
+                "feature": "lon_venus_cos",
+                "meanAbsPearson": 0.026659760817194036,
+                "n": 1024
+            },
+            {
+                "feature": "lon_saturn_cos",
+                "meanAbsPearson": 0.026356627201882917,
+                "n": 1024
+            },
+            {
+                "feature": "aspect_strength_square",
+                "meanAbsPearson": 0.02591470083556424,
+                "n": 1024
+            },
+            {
+                "feature": "elem_fire",
+                "meanAbsPearson": 0.025840917457781096,
+                "n": 1024
+            },
+            {
+                "feature": "lon_sun_cos",
+                "meanAbsPearson": 0.025725373421769733,
+                "n": 1024
+            },
+            {
+                "feature": "elem_water",
+                "meanAbsPearson": 0.02537537711915101,
+                "n": 1024
+            },
+            {
+                "feature": "lon_jupiter_sin",
+                "meanAbsPearson": 0.025304943594617834,
+                "n": 1024
+            },
+            {
+                "feature": "mod_fixed",
+                "meanAbsPearson": 0.02515537633423277,
+                "n": 1024
+            },
+            {
+                "feature": "mod_mutable",
+                "meanAbsPearson": 0.02431938032547641,
+                "n": 1024
+            },
+            {
+                "feature": "lon_mars_sin",
+                "meanAbsPearson": 0.024292185100384067,
+                "n": 1024
+            },
+            {
+                "feature": "lon_mars_cos",
+                "meanAbsPearson": 0.024223899874469434,
+                "n": 1024
+            },
+            {
+                "feature": "mod_cardinal",
+                "meanAbsPearson": 0.024145550703903004,
+                "n": 1024
+            },
+            {
+                "feature": "elem_air",
+                "meanAbsPearson": 0.024030401925627533,
+                "n": 1024
+            },
+            {
+                "feature": "lon_saturn_sin",
+                "meanAbsPearson": 0.023700635108491432,
+                "n": 1024
+            },
+            {
+                "feature": "lon_moon_sin",
+                "meanAbsPearson": 0.023304913707271245,
+                "n": 1024
+            },
+            {
+                "feature": "lon_jupiter_cos",
+                "meanAbsPearson": 0.02327397238463155,
+                "n": 1024
+            },
+            {
+                "feature": "lon_venus_sin",
+                "meanAbsPearson": 0.023211730584682396,
+                "n": 1024
+            },
+            {
+                "feature": "lon_sun_sin",
+                "meanAbsPearson": 0.0229568709023153,
+                "n": 1024
+            },
+            {
+                "feature": "lon_mercury_sin",
+                "meanAbsPearson": 0.02287017477914627,
+                "n": 1024
+            },
+            {
+                "feature": "aspect_strength_opposition",
+                "meanAbsPearson": 0.02278769833512564,
+                "n": 1024
+            },
+            {
+                "feature": "aspect_strength_conjunction",
+                "meanAbsPearson": 0.02277460178694781,
+                "n": 1024
+            }
+        ],
+        "featureImportanceDetrended": [
+            {
+                "feature": "lon_pluto_sin",
+                "meanAbsPearson": 0.06909931995496105,
+                "n": 1024
+            },
+            {
+                "feature": "lon_neptune_sin",
+                "meanAbsPearson": 0.06714272385629305,
+                "n": 1024
+            },
+            {
+                "feature": "lon_pluto_cos",
+                "meanAbsPearson": 0.06015635218659789,
+                "n": 1024
+            },
+            {
+                "feature": "lon_neptune_cos",
+                "meanAbsPearson": 0.05398349425284095,
+                "n": 1024
+            },
+            {
+                "feature": "lon_uranus_cos",
+                "meanAbsPearson": 0.04106724392703413,
+                "n": 1024
+            },
+            {
+                "feature": "lon_uranus_sin",
+                "meanAbsPearson": 0.03435447780363545,
+                "n": 1024
+            },
+            {
+                "feature": "elem_earth",
+                "meanAbsPearson": 0.028374772877788307,
+                "n": 1024
+            },
+            {
+                "feature": "lon_mercury_cos",
+                "meanAbsPearson": 0.027925245938964605,
+                "n": 1024
+            },
+            {
+                "feature": "aspect_strength_trine",
+                "meanAbsPearson": 0.02752946004531674,
+                "n": 1024
+            },
+            {
+                "feature": "lon_moon_cos",
+                "meanAbsPearson": 0.027309537150571404,
+                "n": 1024
+            },
+            {
+                "feature": "lon_venus_cos",
+                "meanAbsPearson": 0.02653107699308549,
+                "n": 1024
+            },
+            {
+                "feature": "lon_saturn_cos",
+                "meanAbsPearson": 0.026496424024173848,
+                "n": 1024
+            },
+            {
+                "feature": "lon_sun_cos",
+                "meanAbsPearson": 0.026287846076338925,
+                "n": 1024
+            },
+            {
+                "feature": "aspect_strength_square",
+                "meanAbsPearson": 0.02596445043584873,
+                "n": 1024
+            },
+            {
+                "feature": "aspect_strength_sextile",
+                "meanAbsPearson": 0.025917259404765688,
+                "n": 1024
+            },
+            {
+                "feature": "lon_jupiter_sin",
+                "meanAbsPearson": 0.025474996278336208,
+                "n": 1024
+            },
+            {
+                "feature": "elem_water",
+                "meanAbsPearson": 0.025435923097457323,
+                "n": 1024
+            },
+            {
+                "feature": "mod_fixed",
+                "meanAbsPearson": 0.025168650851930496,
+                "n": 1024
+            },
+            {
+                "feature": "elem_fire",
+                "meanAbsPearson": 0.024942920937553945,
+                "n": 1024
+            },
+            {
+                "feature": "lon_mars_sin",
+                "meanAbsPearson": 0.024605566404764363,
+                "n": 1024
+            },
+            {
+                "feature": "lon_mars_cos",
+                "meanAbsPearson": 0.024385703260743682,
+                "n": 1024
+            },
+            {
+                "feature": "mod_cardinal",
+                "meanAbsPearson": 0.024118783364264887,
+                "n": 1024
+            },
+            {
+                "feature": "mod_mutable",
+                "meanAbsPearson": 0.024086859999753588,
+                "n": 1024
+            },
+            {
+                "feature": "elem_air",
+                "meanAbsPearson": 0.024026825726150468,
+                "n": 1024
+            },
+            {
+                "feature": "lon_saturn_sin",
+                "meanAbsPearson": 0.023885257343182607,
+                "n": 1024
+            },
+            {
+                "feature": "lon_jupiter_cos",
+                "meanAbsPearson": 0.02374941755601213,
+                "n": 1024
+            },
+            {
+                "feature": "lon_moon_sin",
+                "meanAbsPearson": 0.023394038328508074,
+                "n": 1024
+            },
+            {
+                "feature": "lon_venus_sin",
+                "meanAbsPearson": 0.023363152099729396,
+                "n": 1024
+            },
+            {
+                "feature": "lon_sun_sin",
+                "meanAbsPearson": 0.023331626816722063,
+                "n": 1024
+            },
+            {
+                "feature": "lon_mercury_sin",
+                "meanAbsPearson": 0.02306686617462775,
+                "n": 1024
+            },
+            {
+                "feature": "aspect_strength_opposition",
+                "meanAbsPearson": 0.02291002416222302,
+                "n": 1024
+            },
+            {
+                "feature": "aspect_strength_conjunction",
+                "meanAbsPearson": 0.022044554175557778,
+                "n": 1024
+            }
+        ],
+        "correlationResultVersion": 2,
+        "s3Uri": "s3://astro-raw/stats-correlation/a533f937848aedd9769217d2765373cc-1771167443674.json"
+    },
+    "s3Url": "http://minio:9000/stats-correlation/a533f937848aedd9769217d2765373cc-1771167443674.json?x-id=GetObject&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minio%2F20260215%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260215T145724Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=0d545000873c7c9fe37234fcd1296def4e573d75cf650134fc659958ddb4c6fc"
