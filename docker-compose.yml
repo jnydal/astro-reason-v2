@@ -96,7 +96,7 @@ services:
       PG_DSN: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/astro_reason}
       FETCH_BIO_URL: http://fetch-bio:8002
       RESOLVE_LIMIT: ${RESOLVE_LIMIT:-50}
-      WIKI_USER_AGENT: ${WIKI_USER_AGENT:-astro-reason/0.1 (contact: you@example.com)}
+      WIKI_USER_AGENT: "${WIKI_USER_AGENT:-astro-reason/0.1 (contact: jnydal@gmail.com)}"
       # Faster but still polite defaults for Wikidata API
       WIKIDATA_MIN_INTERVAL_SEC: ${WIKIDATA_MIN_INTERVAL_SEC:-0.5}
       WIKIDATA_JITTER_SEC: ${WIKIDATA_JITTER_SEC:-0.1}
