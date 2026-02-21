@@ -55,7 +55,7 @@ consumer.subscribe([TOPIC])
 - Module-level docstrings describe purpose and dependencies
 - Use `cursor_factory=psycopg2.extras.DictCursor` for row access by name
 - Batch processing: chunk with `EMBEDDINGS_CHUNK_SIZE` (default 32)
-- `EMBEDDINGS_REQUIRE_QID`: when true, filter to people with `entity_link` before embedding
+- Embeddings: computed for all people with bio_text; correlation endpoint has `embeddingsScope=qid_only` to restrict to wiki-enriched
 
 ## Embeddings
 

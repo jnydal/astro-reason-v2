@@ -111,7 +111,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - `GET /version` - Version information
 - `POST /ingest/astrodatabank` - Upload XML file
 - `GET /jobs/{jobId}` - Get job status
-- `GET /stats/correlation` - Enqueue correlation job (default mode: astro features; optional `?mode=interpretations`)
+- `GET /stats/correlation` - Enqueue correlation job (default mode: astro features; optional `?mode=interpretations`; optional `?embeddingsScope=all|qid_only` to restrict to wiki-enriched people)
 - `GET /stats/correlation/{jobId}` - Fetch correlation result/status. Result includes `featureImportance` (original) and, for features mode, `featureImportanceDetrended` (after birth-year detrending)
 
 **Dependencies**: Database, Kafka, MinIO
@@ -146,7 +146,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 
 **Model**: BAAI/bge-large-en-v1.5 (configurable)
 
-**Configuration**: `EMBEDDINGS_REQUIRE_QID` (default: `false`). When `true`, filters to people with `entity_link` (Wikidata QID) before computing embeddings; when `false`, any `bio_text` source is used.
+Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia). Use the correlation endpoint's `embeddingsScope=qid_only` parameter to restrict correlation analysis to wiki-enriched people only.
 
 **Dependencies**: Database, Kafka
 

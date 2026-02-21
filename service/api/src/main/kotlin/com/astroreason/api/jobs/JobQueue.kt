@@ -30,10 +30,11 @@ class ApiJobQueue {
         )
     }
 
-    fun enqueueCorrelation(limit: Int?, minSamples: Int, mode: String = "features"): Job {
+    fun enqueueCorrelation(limit: Int?, minSamples: Int, mode: String = "features", embeddingsScope: String = "all"): Job {
         val kwargs = buildMap {
             put("minSamples", minSamples.toString())
             put("mode", mode)
+            put("embeddingsScope", embeddingsScope)
             limit?.let { put("limit", it.toString()) }
         }
         return statsQueue.enqueue(

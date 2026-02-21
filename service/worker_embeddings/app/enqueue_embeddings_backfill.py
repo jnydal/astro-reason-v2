@@ -34,21 +34,11 @@ def _get_dsn() -> str:
     return _normalize_dsn(raw)
 
 
-def _require_qid() -> bool:
-    v = os.getenv("EMBEDDINGS_REQUIRE_QID", "false").lower()
-    return v in ("true", "1", "yes")
-
-
-def _person_ids_bio_no_embeddings(conn, require_qid: bool = False) -> list[str]:
+def _person_ids_bio_no_embeddings(conn) -> list[str]:
     """Person IDs that have bio_text with text but no embeddings in any dimension table."""
     cur = conn.cursor()
-    qid_clause = (
-        " AND EXISTS (SELECT 1 FROM entity_link el WHERE el.person_id = bt.person_id)"
-        if require_qid
-        else ""
-    )
     cur.execute(
-        f"""
+        """
         SELECT DISTINCT bt.person_id::text
         FROM bio_text bt
         WHERE bt.text IS NOT NULL AND LENGTH(TRIM(bt.text)) > 0
@@ -60,7 +50,7 @@ def _person_ids_bio_no_embeddings(conn, require_qid: bool = False) -> list[str]:
             SELECT 1 FROM embeddings_1024 e WHERE e.person_id = bt.person_id
             UNION
             SELECT 1 FROM embeddings_1536 e WHERE e.person_id = bt.person_id
-          ){qid_clause}
+          )
         ORDER BY 1
         """
     )
@@ -78,10 +68,9 @@ def main(batch_size: int = 500) -> None:
     topic = os.getenv("KAFKA_EMBEDDINGS_TOPIC", "embeddings")
     model = os.getenv("EMBEDDINGS_MODEL", "BAAI/bge-large-en-v1.5")
 
-    require_qid = _require_qid()
     conn = psycopg2.connect(dsn)
     try:
-        person_ids = _person_ids_bio_no_embeddings(conn, require_qid=require_qid)
+        person_ids = _person_ids_bio_no_embeddings(conn)
     finally:
         conn.close()
 
@@ -89,7 +78,7 @@ def main(batch_size: int = 500) -> None:
         print("No person_ids with bio_text and missing embeddings. Nothing to enqueue.")
         return
 
-    scope = "bio_text + entity_link without embeddings" if require_qid else "bio_text without embeddings"
+    scope = "bio_text without embeddings"
     print(
         f"Enqueueing embedding jobs for {len(person_ids)} people ({scope}) to topic '{topic}'..."
     )

@@ -85,13 +85,13 @@ fun loadEmbeddingAstroRows(limit: Int? = null, modelName: String? = null): List<
     }
 }
 
-fun loadEmbeddingAstroRowsForCorrelation(limit: Int? = null, withBirthYear: Boolean = false): EmbeddingSelection {
+fun loadEmbeddingAstroRowsForCorrelation(limit: Int? = null, withBirthYear: Boolean = false, qidOnly: Boolean = false): EmbeddingSelection {
     return transaction(DatabaseManager.getDatabase()) {
         val selectedDim = EMBEDDING_DIM_PREFERENCE.firstOrNull { dim ->
             embeddingTableHasRows(dim)
         } ?: return@transaction EmbeddingSelection(0, emptyList())
 
-        val rows = loadEmbeddingAstroRowsForDim(selectedDim, limit, modelName = null, withBirthYear = withBirthYear)
+        val rows = loadEmbeddingAstroRowsForDim(selectedDim, limit, modelName = null, withBirthYear = withBirthYear, qidOnly = qidOnly)
         EmbeddingSelection(selectedDim, rows)
     }
 }
@@ -101,13 +101,13 @@ fun loadEmbeddingAstroRowsForCorrelation(limit: Int? = null, withBirthYear: Bool
  * Joins embeddings with astro_interpretations; each row gets synthetic features
  * "interpretation" = 1.0 and "interpretation:&lt;modelName&gt;" = 1.0.
  */
-fun loadEmbeddingInterpretationRowsForCorrelation(limit: Int? = null): EmbeddingSelection {
+fun loadEmbeddingInterpretationRowsForCorrelation(limit: Int? = null, qidOnly: Boolean = false): EmbeddingSelection {
     return transaction(DatabaseManager.getDatabase()) {
         val selectedDim = EMBEDDING_DIM_PREFERENCE.firstOrNull { dim ->
             embeddingTableHasRows(dim)
         } ?: return@transaction EmbeddingSelection(0, emptyList())
 
-        val rows = loadEmbeddingInterpretationRowsForDim(selectedDim, limit)
+        val rows = loadEmbeddingInterpretationRowsForDim(selectedDim, limit, qidOnly = qidOnly)
         EmbeddingSelection(selectedDim, rows)
     }
 }
@@ -339,7 +339,8 @@ private fun loadEmbeddingAstroRowsForDim(
     dim: Int,
     limit: Int? = null,
     modelName: String? = null,
-    withBirthYear: Boolean = false
+    withBirthYear: Boolean = false,
+    qidOnly: Boolean = false
 ): List<ClusterRow> {
     val (personCol, modelCol, vectorCol, updatedCol, tableName) = when (dim) {
         1024 -> EmbeddingColumns(
@@ -357,13 +358,17 @@ private fun loadEmbeddingAstroRowsForDim(
         else -> return emptyList()
     }
 
-    val baseJoin = when (tableName) {
+    val embeddingTable = when (tableName) {
         Embeddings1024.tableName -> Embeddings1024
         Embeddings768.tableName -> Embeddings768
         Embeddings384.tableName -> Embeddings384
         Embeddings1536.tableName -> Embeddings1536
         else -> return emptyList()
-    }.join(AstroFeatures, org.jetbrains.exposed.sql.JoinType.INNER, personCol, AstroFeatures.id)
+    }
+    var baseJoin = embeddingTable.join(AstroFeatures, org.jetbrains.exposed.sql.JoinType.INNER, personCol, AstroFeatures.id)
+    if (qidOnly) {
+        baseJoin = baseJoin.join(EntityLink, org.jetbrains.exposed.sql.JoinType.INNER, personCol, EntityLink.id)
+    }
 
     val query = if (withBirthYear) {
         baseJoin
@@ -412,7 +417,8 @@ private fun loadEmbeddingAstroRowsForDim(
 
 private fun loadEmbeddingInterpretationRowsForDim(
     dim: Int,
-    limit: Int? = null
+    limit: Int? = null,
+    qidOnly: Boolean = false
 ): List<ClusterRow> {
     val (personCol, modelCol, vectorCol, updatedCol, tableName) = when (dim) {
         1024 -> EmbeddingColumns(
@@ -430,14 +436,18 @@ private fun loadEmbeddingInterpretationRowsForDim(
         else -> return emptyList()
     }
 
-    val query = when (tableName) {
+    val embeddingTable = when (tableName) {
         Embeddings1024.tableName -> Embeddings1024
         Embeddings768.tableName -> Embeddings768
         Embeddings384.tableName -> Embeddings384
         Embeddings1536.tableName -> Embeddings1536
         else -> return emptyList()
     }
-        .join(AstroInterpretations, org.jetbrains.exposed.sql.JoinType.INNER, personCol, AstroInterpretations.id)
+    var baseJoin = embeddingTable.join(AstroInterpretations, org.jetbrains.exposed.sql.JoinType.INNER, personCol, AstroInterpretations.id)
+    if (qidOnly) {
+        baseJoin = baseJoin.join(EntityLink, org.jetbrains.exposed.sql.JoinType.INNER, personCol, EntityLink.id)
+    }
+    val query = baseJoin
         .slice(personCol, modelCol, vectorCol, updatedCol, AstroInterpretations.modelName)
         .select { modelCol.isNotNull() }
         .orderBy(updatedCol, SortOrder.DESC_NULLS_LAST)

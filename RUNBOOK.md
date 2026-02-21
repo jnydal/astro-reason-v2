@@ -92,8 +92,7 @@ Embeddings worker processes jobs automatically:
 - Generates semantic vectors
 - Stores in `embeddings_*` tables
 
-**Configuration**:
-- `EMBEDDINGS_REQUIRE_QID` (default: `false`): When `true`, only people with a Wikidata QID (`entity_link`) get embeddings (Wikipedia-enriched bios only). When `false`, any `bio_text` source (XML stubs or Wikipedia) is used.
+Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia). Use the correlation endpoint's `embeddingsScope` parameter to choose which embeddings to include in correlation (see Step 6).
 
 **Monitor**:
 ```bash
@@ -155,7 +154,16 @@ The stats worker processes correlation jobs:
 
 **Enqueue**:
 ```bash
-curl http://localhost:8000/stats/correlation
+# All embeddings (default); mode: features or interpretations
+curl "http://localhost:8000/stats/correlation"
+curl "http://localhost:8000/stats/correlation?mode=interpretations"
+
+# Restrict to wiki-enriched people only (embeddings from persons with QID)
+curl "http://localhost:8000/stats/correlation?embeddingsScope=qid_only"
+curl "http://localhost:8000/stats/correlation?mode=interpretations&embeddingsScope=qid_only"
+
+# Optional: limit, minSamples
+curl "http://localhost:8000/stats/correlation?limit=5000&minSamples=5"
 ```
 
 **Check status / results**:
@@ -437,8 +445,6 @@ WHERE bt.text IS NOT NULL AND LENGTH(TRIM(bt.text)) > 0
   );
 ```
 
-When `EMBEDDINGS_REQUIRE_QID=true`, the backfill only considers people with both `bio_text` and `entity_link`; add `AND EXISTS (SELECT 1 FROM entity_link el WHERE el.person_id = bt.person_id)` to the query above to match.
-
 If this returns a positive number, run the **embeddings backfill** to enqueue jobs for those people:
 
 ```bash
@@ -453,7 +459,7 @@ Ensure the embeddings worker is running to process the queue: `docker compose lo
 2. Restart resolver: `docker compose restart resolver`
 3. Keep resolver running; it processes a batch every 60 seconds
 
-**Note**: When `EMBEDDINGS_REQUIRE_QID=true`, people without a Wikidata match will never get embeddings (that's expected). When `false`, XML bio stubs can still get embeddings.
+**Note**: Embeddings are computed for all people with bio_text (XML stubs or Wikipedia). Use the correlation endpoint's `embeddingsScope=qid_only` to restrict correlation analysis to wiki-enriched people.
 
 ## XML / ADB Data: Domain Rules
 
@@ -510,7 +516,7 @@ Project-specific test targets and edge cases. See `.cursor/rules/04-qa-checklist
 
 | Area | Edge case | Expected behavior |
 |------|-----------|-------------------|
-| Embeddings | `EMBEDDINGS_REQUIRE_QID=true` | People without QID filtered out; no embeddings |
+| Correlation | `embeddingsScope=qid_only` | Only embeddings from persons with entity_link (QID) included |
 | Astro | Missing ephemeris | Swiss Ephemeris → Skyfield fallback can yield different results |
 | Embeddings | Empty/blank bio_text | Skip embedding; no crash |
 | Embeddings | Unsupported dimension | Skip with warning (only 384, 768, 1024, 1536) |
@@ -521,4 +527,6 @@ Project-specific test targets and edge cases. See `.cursor/rules/04-qa-checklist
 
 - `mode=features`: astro features ↔ embeddings; includes birth-year detrending
 - `mode=interpretations`: interpretation embeddings ↔ astro interpretations
+- `embeddingsScope=all` (default): include all embeddings
+- `embeddingsScope=qid_only`: include only embeddings from persons with entity_link (wiki-enriched)
 - Both analyses use same sample (people with known birth date)

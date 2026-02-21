@@ -26,10 +26,6 @@ KAFKA_TOPIC = os.getenv("KAFKA_EMBEDDINGS_TOPIC", "embeddings")
 EMBED_CHUNK_SIZE = max(1, int(os.getenv("EMBEDDINGS_CHUNK_SIZE", "32")))
 
 
-def _require_qid() -> bool:
-    v = os.getenv("EMBEDDINGS_REQUIRE_QID", "false").lower()
-    return v in ("true", "1", "yes")
-
 def _update_job_status(job_id: str, status: str, result: str | None = None, exc_info: str | None = None) -> None:
     if not DSN:
         return
@@ -88,38 +84,6 @@ def embed_person_bios(payload: dict, heartbeat=None):
         cur.close()
         conn.close()
         return {"status": "no_ids"}
-
-    # Filter to people with entity_link (Wikidata QID) when EMBEDDINGS_REQUIRE_QID=true
-    if _require_qid():
-        conn_filter = psycopg2.connect(DSN)
-        cur_filter = conn_filter.cursor()
-        cur_filter.execute(
-            "SELECT person_id FROM entity_link WHERE person_id = ANY(%s::uuid[])",
-            (person_ids,),
-        )
-        qid_ids = [r[0] for r in cur_filter.fetchall()]
-        cur_filter.close()
-        conn_filter.close()
-        filtered_out = len(person_ids) - len(qid_ids)
-        if filtered_out:
-            print(f"EMBEDDINGS_REQUIRE_QID=true: filtered out {filtered_out} person(s) without entity_link.")
-        person_ids = qid_ids
-        if not person_ids:
-            print("No person_ids with entity_link. Skipping.")
-            conn = psycopg2.connect(DSN)
-            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-            log_event(
-                cur,
-                stage="embeddings",
-                status="ok",
-                count=0,
-                duration_ms=int((time.monotonic() - started) * 1000),
-                meta={"model": model_name, "source": source, "require_qid_filtered": filtered_out},
-            )
-            conn.commit()
-            cur.close()
-            conn.close()
-            return {"status": "noop", "count": 0, "filtered": filtered_out}
 
     print(f"Embedding {len(person_ids)} bios using {model_name}...")
 

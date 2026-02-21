@@ -281,7 +281,6 @@ services:
       KAFKA_GROUP_ID: ${KAFKA_EMBEDDINGS_GROUP_ID:-embeddings-worker}
       KAFKA_EMBEDDINGS_TOPIC: ${KAFKA_EMBEDDINGS_TOPIC:-embeddings}
       EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-BAAI/bge-large-en-v1.5}
-      EMBEDDINGS_REQUIRE_QID: ${EMBEDDINGS_REQUIRE_QID:-false}
     ports:
       - "8090:8090"
     deploy:

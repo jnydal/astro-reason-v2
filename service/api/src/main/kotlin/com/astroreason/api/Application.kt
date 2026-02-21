@@ -130,7 +130,8 @@ fun Application.module() {
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull()
                 val minSamples = call.request.queryParameters["minSamples"]?.toIntOrNull() ?: 3
                 val mode = call.request.queryParameters["mode"]?.takeIf { it in setOf("features", "interpretations") } ?: "features"
-                val job = jobQueue.enqueueCorrelation(limit, minSamples, mode)
+                val embeddingsScope = call.request.queryParameters["embeddingsScope"]?.takeIf { it in setOf("all", "qid_only") } ?: "all"
+                val job = jobQueue.enqueueCorrelation(limit, minSamples, mode, embeddingsScope)
                 call.respond(
                     CorrelationJobResponse(
                         jobId = job.id,
@@ -171,9 +172,11 @@ fun Application.module() {
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull()
                 val minSamples = call.request.queryParameters["minSamples"]?.toIntOrNull() ?: 3
                 val mode = call.request.queryParameters["mode"]?.takeIf { it in setOf("features", "interpretations") } ?: "features"
+                val embeddingsScope = call.request.queryParameters["embeddingsScope"]?.takeIf { it in setOf("all", "qid_only") } ?: "all"
+                val qidOnly = embeddingsScope == "qid_only"
                 val selection = when (mode) {
-                    "interpretations" -> loadEmbeddingInterpretationRowsForCorrelation(limit)
-                    else -> loadEmbeddingAstroRowsForCorrelation(limit)
+                    "interpretations" -> loadEmbeddingInterpretationRowsForCorrelation(limit, qidOnly = qidOnly)
+                    else -> loadEmbeddingAstroRowsForCorrelation(limit, qidOnly = qidOnly)
                 }
                 if (selection.rows.isEmpty()) {
                     call.respond(FeatureImportanceResponse(entries = emptyList()))
