@@ -16,26 +16,20 @@ alwaysApply: true
 
 ### Unit
 
-- `parsePgVector`: bracketed `[1,2,3]`, parenthesized `(1.25,-2.5,3)`, empty `[]`
-- Astro feature computation: deterministic output for fixed birth record (use monkeypatch for backends)
-- Feature vector shape: `lon_{planet}_sin`, `lon_{planet}_cos`, `elem_ratios`, `modality_ratios`
+- Parsing and data transformations (e.g. vector parsing, date handling)
+- Deterministic computations (use monkeypatch for external backends)
+- Output shape and schema validation
 
 ### Integration
 
-- End-to-end: upload XML → ingest → embeddings → astro → interpretation
-- Job status transitions: QUEUED → STARTED → FINISHED / FAILED
-- Correlation: `featureImportance` and `featureImportanceDetrended` when mode=features
+- End-to-end pipeline flow
+- Job status transitions (QUEUED → STARTED → FINISHED / FAILED)
+- Feature outputs and correlations
+
+### Documentation
+
+- When making changes: update the relevant documentation (RUNBOOK.md, ARCHITECTURE.md, etc.) so it stays in sync with the code.
 
 ### Edge Cases
 
-- **EMBEDDINGS_REQUIRE_QID=true**: people without QID are filtered out; no embeddings
-- **Missing ephemeris**: Swiss Ephemeris → Skyfield fallback can yield different results
-- **Empty/blank bio_text**: skip embedding; no crash
-- **Unsupported embedding dimension**: skip with warning (only 384,768,1024,1536)
-- **Backfill gap**: people with `bio_text` but no embeddings; use `enqueue_embeddings_backfill`
-
-## Correlation Mode
-
-- `mode=features`: astro features ↔ embeddings; includes birth-year detrending
-- `mode=interpretations`: interpretation embeddings ↔ astro interpretations
-- Both analyses use same sample (people with known birth date)
+- Cover known edge cases for the area you changed (config flags, fallbacks, empty input, schema mismatches, backfill flows). See RUNBOOK "QA Test Catalog" for project-specific catalog.

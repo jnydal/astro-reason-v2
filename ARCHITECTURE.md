@@ -162,9 +162,11 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 **Workflow**:
 1. Query people without QIDs
 2. Search Wikidata API
-3. Match by date of birth
+3. Match by date of birth (P569); no fallback without DOB match
 4. Store QID in `bio_text`
 5. Call fetch-bio API
+
+**Skip logic**: Skips non-person entries (events, accidents, disasters, roles) that won't resolve to a person with matching birth data. See RUNBOOK "ADB Export Edge Cases (Resolver Skip Logic)" for patterns and examples.
 
 **Dependencies**: Database, Fetch-Bio Service
 

@@ -10,6 +10,7 @@ import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.expectSuccess
 import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.*
 import io.ktor.http.*
@@ -74,6 +75,7 @@ class QidResolver {
     private val minIntervalMs = ((System.getenv("WIKIDATA_MIN_INTERVAL_SEC") ?: "1.0").toDouble() * 1000).toLong()
     private val jitterMs = ((System.getenv("WIKIDATA_JITTER_SEC") ?: "0.2").toDouble() * 1000).toLong()
     private var nextRequestTimeMs = 0L
+    private val userAgent = System.getenv("WIKI_USER_AGENT") ?: "astro-reason/0.1 (contact: jnydal@gmail.com)"
 
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
@@ -83,6 +85,9 @@ class QidResolver {
             })
         }
         install(HttpTimeout)
+        defaultRequest {
+            header(HttpHeaders.UserAgent, userAgent)
+        }
     }
 
     private suspend fun waitForRateLimit() {
@@ -109,6 +114,25 @@ class QidResolver {
         val first = cleaned.substring(commaIndex + 1).trim()
         if (first.isBlank()) return cleaned
         return "$first $last"
+    }
+
+    /**
+     * Returns false for event names, accidents, disasters, roles, and other entries that
+     * won't resolve to a person with matching birth data (P569) and sensible Wikipedia bio.
+     * Goal: process all people with birth data and bio; skip only when resolution won't yield useful data.
+     */
+    private fun looksLikePerson(name: String): Boolean {
+        val n = name.trim()
+        if (n.isEmpty()) return false
+        if (n[0].isDigit()) return false
+        val lower = n.lowercase()
+        val skipPatterns = listOf(
+            "accident:", "derailment", "academic:", "earthquake", "attacks survivor",
+            "explosion", "missile strike", "disaster", "victim", "vocation :", "role :",
+            "nature: ", "nature:", "helicopter crash", "train derailment", "train crash",
+            "bus crash", "plane crash", "gas explosion", "shopping center strike"
+        )
+        return !skipPatterns.any { lower.contains(it) }
     }
     
     suspend fun searchQid(name: String): List<WikidataItem> {
@@ -161,8 +185,8 @@ class QidResolver {
                 .leftJoin(EntityLink, { PersonRaw.id }, { EntityLink.id })
                 .slice(PersonRaw.id, PersonRaw.name, Birth.date)
                 .select { EntityLink.id.isNull() }
-                .orderBy(PersonRaw.name)
-                .limit(limit)
+                .orderBy(PersonRaw.createdAt to SortOrder.ASC, PersonRaw.name to SortOrder.ASC)
+                .limit(limit * 10)
                 .map { row ->
                     PendingPerson(
                         personId = row[PersonRaw.id].value,
@@ -170,6 +194,8 @@ class QidResolver {
                         dobIso = row[Birth.date]?.format(DateTimeFormatter.ISO_DATE)
                     )
                 }
+                .filter { person -> looksLikePerson(person.fullName) }
+                .take(limit)
         }
 
         data class ResolvedQid(
@@ -187,17 +213,13 @@ class QidResolver {
             }
             var qid: String? = null
 
-            // Try to match by date
+            // Only accept when Wikidata entity has matching birth date (P569).
+            // No fallback to first candidate: prevents linking events/non-persons.
             for (candidate in candidates.take(10)) {
                 if (dobMatches(candidate.id, person.dobIso)) {
                     qid = candidate.id
                     break
                 }
-            }
-
-            // Fallback to first candidate
-            if (qid == null && candidates.isNotEmpty()) {
-                qid = candidates[0].id
             }
 
             if (qid != null) {

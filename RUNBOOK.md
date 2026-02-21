@@ -454,3 +454,71 @@ Ensure the embeddings worker is running to process the queue: `docker compose lo
 3. Keep resolver running; it processes a batch every 60 seconds
 
 **Note**: When `EMBEDDINGS_REQUIRE_QID=true`, people without a Wikidata match will never get embeddings (that's expected). When `false`, XML bio stubs can still get embeddings.
+
+## XML / ADB Data: Domain Rules
+
+Functional and domain rules for what data we ingest from the AstroDatabank XML and how we treat it. When changing ingest, resolver, or data handling logic, keep this section in sync.
+
+### Ingest Rules
+
+- **Required**: `adb_id` and `full_name` must be non-blank. Entries without both are not ingested.
+- **Supported formats**: `<person>` and `<adb_entry>`. Parser extracts `public_data/name`, `public_data/bdata/sbdate`, `sbtime`, `place`, `text_data/shortbiography`, etc.
+- **Birth data**: Date, time, place, lat/lon stored in `birth`. Entries with `date` are enqueued for astro feature computation.
+- **Bio text**: From `shortbiography`; stored in `bio_text` with source from upload metadata. Optional at ingest.
+
+### Entry Types in XML
+
+The ADB export mixes **people** (e.g. "Cardano, Girolamo") and **non-person entries** (events, accidents, disasters, roles). We ingest all entries that have `adb_id` + `full_name`, but the **resolver** skips non-person entries when attempting QID resolution.
+
+### Resolver Skip Logic (Non-Person Entries)
+
+Entries whose names match these patterns are not attempted for Wikidata resolution—they won't yield a person with matching birth data and Wikipedia bio:
+
+| Pattern | Examples |
+|---------|----------|
+| Names starting with a digit | "1943 Frankford Junction derailment", "2015 Paris attacks survivor" |
+| `accident:` | "Accident: 1955 Le Mans disaster" |
+| `derailment`, `earthquake`, `explosion`, `disaster` | Event and disaster entries |
+| `academic:`, `vocation :`, `role :` | Role/category entries |
+| `nature: ` | "Nature: Loma Prieta Earthquake:California 1989" |
+| `helicopter crash`, `train derailment`, `bus crash`, `plane crash`, `gas explosion`, `shopping center strike` | Accident/event subtypes |
+| `victim` | "Abuse victim 44646" |
+
+**Full skip-pattern list** (case-insensitive substring match): `accident:`, `derailment`, `academic:`, `earthquake`, `attacks survivor`, `explosion`, `missile strike`, `disaster`, `victim`, `vocation :`, `role :`, `nature: `, `nature:`, `helicopter crash`, `train derailment`, `train crash`, `bus crash`, `plane crash`, `gas explosion`, `shopping center strike`.
+
+### Resolution Acceptance
+
+- Only accept a Wikidata match when the entity has **P569 (birth date)** matching our birth date. No fallback to "first candidate" without DOB match.
+
+## QA Test Catalog
+
+Project-specific test targets and edge cases. See `.cursor/rules/04-qa-checklist.mdc` for general QA process steps.
+
+### Unit Test Targets
+
+- `parsePgVector`: bracketed `[1,2,3]`, parenthesized `(1.25,-2.5,3)`, empty `[]`
+- Astro feature computation: deterministic output for fixed birth record (use monkeypatch for backends)
+- Feature vector shape: `lon_{planet}_sin`, `lon_{planet}_cos`, `elem_ratios`, `modality_ratios`
+
+### Integration Test Targets
+
+- End-to-end: upload XML → ingest → embeddings → astro → interpretation
+- Job status transitions: QUEUED → STARTED → FINISHED / FAILED
+- Correlation: `featureImportance` and `featureImportanceDetrended` when mode=features
+
+### Edge Cases
+
+| Area | Edge case | Expected behavior |
+|------|-----------|-------------------|
+| Embeddings | `EMBEDDINGS_REQUIRE_QID=true` | People without QID filtered out; no embeddings |
+| Astro | Missing ephemeris | Swiss Ephemeris → Skyfield fallback can yield different results |
+| Embeddings | Empty/blank bio_text | Skip embedding; no crash |
+| Embeddings | Unsupported dimension | Skip with warning (only 384, 768, 1024, 1536) |
+| Embeddings | Backfill gap | People with `bio_text` but no embeddings; use `enqueue_embeddings_backfill` |
+| Resolver | Skip filters | Non-person entries skipped; only DOB-matched resolutions accepted. See RUNBOOK "XML / ADB Data: Domain Rules". |
+
+### Correlation Mode
+
+- `mode=features`: astro features ↔ embeddings; includes birth-year detrending
+- `mode=interpretations`: interpretation embeddings ↔ astro interpretations
+- Both analyses use same sample (people with known birth date)
