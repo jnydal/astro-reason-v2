@@ -1,0 +1,70 @@
+---
+description: Python coding conventions and patterns for astro-reason
+globs: ["**/*.py"]
+alwaysApply: false
+---
+
+# Python Development Guidelines
+
+## Tech Stack
+
+- **API**: FastAPI (fetch-bio)
+- **DB**: psycopg2, pgvector for embeddings
+- **Queue**: confluent_kafka
+- **ML**: sentence-transformers (BAAI/bge-large-en-v1.5 default)
+
+## Configuration
+
+- Config via `os.getenv()` with sensible defaults
+- Normalize DSN: `postgresql+psycopg://` → `postgresql://` before psycopg2
+
+```python
+def _normalize_dsn(dsn: str) -> str:
+    if dsn.startswith("postgresql+psycopg://"):
+        return "postgresql://" + dsn[len("postgresql+psycopg://"):]
+    return dsn
+```
+
+## External APIs (Wikidata, Wikipedia)
+
+- Use `RateLimiter(min_interval_sec, jitter_sec)` to respect rate limits
+- Set `WIKI_USER_AGENT` with contact info
+- Default: 1 req/sec + jitter
+
+## Job Status
+
+- Update `job_status` on STARTED, FINISHED, FAILED
+- Use `_update_job_status(job_id, status, result=..., exc_info=...)`
+- Enqueue jobs with `id`, `function`, `kwargs`, `status`, `enqueuedAt`
+
+## Provenance
+
+- Log via `provenance_event` or `log_event(cur, stage, status, count, duration_ms, meta=...)`
+- Include `duration_ms`, `count`, `meta` (model, source, etc.)
+
+## Kafka Consumer Pattern
+
+```python
+consumer = Consumer({"bootstrap.servers": ..., "group.id": ..., "auto.offset.reset": "earliest"})
+consumer.subscribe([TOPIC])
+# Parse payload, update job_status, call handler, commit
+```
+
+## Conventions
+
+- Module-level docstrings describe purpose and dependencies
+- Use `cursor_factory=psycopg2.extras.DictCursor` for row access by name
+- Batch processing: chunk with `EMBEDDINGS_CHUNK_SIZE` (default 32)
+- `EMBEDDINGS_REQUIRE_QID`: when true, filter to people with `entity_link` before embedding
+
+## Embeddings
+
+- Supported dimensions: 384, 768, 1024, 1536 → tables `embeddings_{dim}`
+- Use `ON CONFLICT (person_id, model_name) DO UPDATE` for upserts
+- Store `text_hash` for change detection; skip if unchanged
+
+## Astro Features
+
+- Backends: `swisseph` (default) or `skyfield` fallback
+- Feature vector keys: `lon_{planet}_sin`, `lon_{planet}_cos`, etc.
+- Use `backend` parameter in tests for deterministic output

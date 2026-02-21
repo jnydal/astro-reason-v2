@@ -1,0 +1,80 @@
+---
+description: Kotlin coding conventions and patterns for astro-reason
+globs: ["**/*.kt"]
+alwaysApply: false
+---
+
+# Kotlin Development Guidelines
+
+## Tech Stack
+
+- **Framework**: Ktor 2.3.7
+- **Database**: Exposed ORM 0.49.0, HikariCP 5.1.0
+- **Serialization**: Kotlinx Serialization 1.6.2
+- **HTTP Client**: Ktor Client
+- **AWS SDK**: AWS SDK for Kotlin (S3)
+- **Kafka**: Spring Kafka
+
+## Package Structure
+
+```
+com.astroreason.<service>.<module>
+```
+
+Examples: `com.astroreason.api`, `com.astroreason.ingest`, `com.astroreason.core`
+
+## Configuration
+
+- Read config from `Config.settings` (initialized via `Config.initialize()` at startup)
+- Prefer `PG_DSN` or `DATABASE_URL`; use `System.getenv()` with fallbacks
+- See `service/core/.../Settings.kt` for canonical env var names
+
+## Database Access
+
+```kotlin
+transaction(DatabaseManager.getDatabase()) {
+    // Exposed queries here
+}
+```
+
+- Use Exposed `Table` definitions from `service/core/.../Tables.kt`
+- Prefer batch inserts over per-row; use `flushBatches()` pattern for large datasets
+- New tables: define in `Tables.kt`, add migration in `infra/sql/`
+
+## Provenance
+
+Log pipeline actions for observability:
+
+```kotlin
+logProvenanceEvent(
+    stage = "ingest",
+    status = "ok",
+    count = touchedPids.size,
+    durationMs = (System.nanoTime() - startedAt) / 1_000_000,
+    meta = mapOf("source" to source, "object_uri" to objectUri)
+)
+```
+
+## Job Queue
+
+- Jobs have `id`, `function`, `status`, `args`, `kwargs`, `enqueuedAt`, etc.
+- Store in `job_status` table; enqueue to Kafka with JSON payload
+- Use `createJobQueue()` from core; pass `function`, `args`, `kwargs`
+
+## API (Ktor)
+
+- Add routes in `Application.kt` under `routing { }`
+- Use `call.respond()` with data classes; `call.respond(HttpStatusCode.*)` for errors
+- ContentNegotiation with JSON; `encodeDefaults = true`, `ignoreUnknownKeys = true`
+
+## Testing
+
+- Kotest with `StringSpec` style
+- Use `io.kotest.matchers.*` for assertions
+- Unit test pure functions (e.g. `parsePgVector`)
+
+## Conventions
+
+- Prefer `data class` for DTOs; use `@Serializable` for JSON
+- Use `runCatching { }.getOrNull()` for safe parsing
+- Handle `PartData.FileItem` for multipart uploads; validate content type or filename extension

@@ -46,3 +46,5 @@ env/
 ENV/
 
 docs/
+testdata/adb_export_260208_1013.xml
+

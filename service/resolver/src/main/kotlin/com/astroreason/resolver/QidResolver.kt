@@ -158,9 +158,10 @@ class QidResolver {
         val pending = transaction(DatabaseManager.getDatabase()) {
             PersonRaw
                 .innerJoin(Birth, { PersonRaw.id }, { Birth.id })
-                .leftJoin(BioText, { PersonRaw.id }, { BioText.personId })
+                .leftJoin(EntityLink, { PersonRaw.id }, { EntityLink.id })
                 .slice(PersonRaw.id, PersonRaw.name, Birth.date)
-                .select { BioText.qid.isNull() or (BioText.qid eq "") }
+                .select { EntityLink.id.isNull() }
+                .orderBy(PersonRaw.name)
                 .limit(limit)
                 .map { row ->
                     PendingPerson(

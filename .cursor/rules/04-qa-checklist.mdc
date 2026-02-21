@@ -1,0 +1,41 @@
+---
+description: QA checklist, acceptance criteria, and known edge cases
+alwaysApply: true
+---
+
+# QA Checklist
+
+## Acceptance Criteria (from NFR)
+
+- **Idempotency**: Reprocessing same input must not corrupt state
+- **Retries**: External calls (Wikidata, Wikipedia, Ollama) use bounded retries with backoff
+- **Failure handling**: Jobs surface clear failure reason; can be re-enqueued safely
+- **Queue safety**: Workers tolerate duplicate or out-of-order jobs
+
+## What Must Be Tested
+
+### Unit
+
+- `parsePgVector`: bracketed `[1,2,3]`, parenthesized `(1.25,-2.5,3)`, empty `[]`
+- Astro feature computation: deterministic output for fixed birth record (use monkeypatch for backends)
+- Feature vector shape: `lon_{planet}_sin`, `lon_{planet}_cos`, `elem_ratios`, `modality_ratios`
+
+### Integration
+
+- End-to-end: upload XML → ingest → embeddings → astro → interpretation
+- Job status transitions: QUEUED → STARTED → FINISHED / FAILED
+- Correlation: `featureImportance` and `featureImportanceDetrended` when mode=features
+
+### Edge Cases
+
+- **EMBEDDINGS_REQUIRE_QID=true**: people without QID are filtered out; no embeddings
+- **Missing ephemeris**: Swiss Ephemeris → Skyfield fallback can yield different results
+- **Empty/blank bio_text**: skip embedding; no crash
+- **Unsupported embedding dimension**: skip with warning (only 384,768,1024,1536)
+- **Backfill gap**: people with `bio_text` but no embeddings; use `enqueue_embeddings_backfill`
+
+## Correlation Mode
+
+- `mode=features`: astro features ↔ embeddings; includes birth-year detrending
+- `mode=interpretations`: interpretation embeddings ↔ astro interpretations
+- Both analyses use same sample (people with known birth date)

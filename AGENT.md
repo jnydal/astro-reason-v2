@@ -96,6 +96,7 @@ LLM_MODEL=qwen2.5:7b-instruct-q4_K_M
 
 # Embeddings
 EMBEDDINGS_MODEL=BAAI/bge-large-en-v1.5
+EMBEDDINGS_REQUIRE_QID=false
 
 # Astro
 SWEPH_EPHE_PATH=/opt/ephe

@@ -92,6 +92,9 @@ Embeddings worker processes jobs automatically:
 - Generates semantic vectors
 - Stores in `embeddings_*` tables
 
+**Configuration**:
+- `EMBEDDINGS_REQUIRE_QID` (default: `false`): When `true`, only people with a Wikidata QID (`entity_link`) get embeddings (Wikipedia-enriched bios only). When `false`, any `bio_text` source (XML stubs or Wikipedia) is used.
+
 **Monitor**:
 ```bash
 docker compose logs -f embeddings
@@ -399,3 +402,55 @@ Jobs are stored in PostgreSQL (`job_status`). Check failed job IDs and re-enqueu
 # Astro and astro-interpreter run continuously (Python). Resolver is Kotlin.
 docker compose restart astro astro-interpreter resolver
 ```
+
+### Pipeline "Stopped" at N People (Embeddings Not Growing)
+
+Embeddings depend on: **Resolver** (assigns Wikidata QID) → **fetch_bio** (fetches Wikipedia) → **embeddings worker**.
+
+The Resolver processes **RESOLVE_LIMIT** people per minute (default **50** in docker-compose). For a full AstroDatabank dataset (~30k), that’s 10+ hours at default.
+
+**Diagnose**:
+
+```bash
+./scripts/diagnose-pipeline.ps1 -UseDocker
+```
+
+Or run SQL:
+
+```sql
+SELECT (SELECT COUNT(*) FROM person_raw) AS total,
+       (SELECT COUNT(*) FROM entity_link) AS with_qid,
+       (SELECT COUNT(DISTINCT person_id) FROM embeddings_384) AS embeddings;
+```
+
+**Check for backfillable gap** (people with bio_text but no embeddings):
+
+```sql
+SELECT COUNT(DISTINCT bt.person_id) AS bio_without_embeddings
+FROM bio_text bt
+WHERE bt.text IS NOT NULL AND LENGTH(TRIM(bt.text)) > 0
+  AND NOT EXISTS (
+    SELECT 1 FROM embeddings_384 e WHERE e.person_id = bt.person_id
+    UNION SELECT 1 FROM embeddings_768 e WHERE e.person_id = bt.person_id
+    UNION SELECT 1 FROM embeddings_1024 e WHERE e.person_id = bt.person_id
+    UNION SELECT 1 FROM embeddings_1536 e WHERE e.person_id = bt.person_id
+  );
+```
+
+When `EMBEDDINGS_REQUIRE_QID=true`, the backfill only considers people with both `bio_text` and `entity_link`; add `AND EXISTS (SELECT 1 FROM entity_link el WHERE el.person_id = bt.person_id)` to the query above to match.
+
+If this returns a positive number, run the **embeddings backfill** to enqueue jobs for those people:
+
+```bash
+docker compose run --rm embeddings python -m app.enqueue_embeddings_backfill
+```
+
+Ensure the embeddings worker is running to process the queue: `docker compose logs -f embeddings`.
+
+**Speed up Resolver** (when upstream QID resolution is the bottleneck):
+
+1. Set `RESOLVE_LIMIT=200` (or higher) in `.env`
+2. Restart resolver: `docker compose restart resolver`
+3. Keep resolver running; it processes a batch every 60 seconds
+
+**Note**: When `EMBEDDINGS_REQUIRE_QID=true`, people without a Wikidata match will never get embeddings (that's expected). When `false`, XML bio stubs can still get embeddings.

@@ -1,0 +1,47 @@
+---
+description: Non-functional requirements and constraints
+alwaysApply: true
+---
+
+# NFR Constraints
+
+## Reliability & Resilience
+
+- **Idempotency**: Pipeline stages must safely reprocess same input without corrupting state
+- **Retries**: Bounded retries with backoff for Wikidata, Wikipedia, Ollama
+- **Data integrity**: Transactional writes where possible; partial writes detectable
+- **Queue safety**: Tolerate duplicate or out-of-order jobs
+
+## Performance
+
+- **Batching**: Batched inserts and vector writes to reduce DB overhead
+- **Throughput**: Queue backlogs drain within 24 hours
+- **Resource caps**: Run within container limits; degrade gracefully
+
+## Observability
+
+### Logs
+
+- Structured fields: `service`, `stage`, `job_id`, `trace_id`, `qid` (when applicable), `status`, `duration_ms`
+- Redact sensitive data; include stack traces for errors
+
+### Provenance
+
+- Record pipeline actions in `provenance_event` where applicable
+
+### Retention
+
+- Metrics: ≥30 days
+- Logs: ≥14 days
+- Traces: ≥7 days
+
+## Security
+
+- Credentials via env vars or secret store (no hardcoding)
+- API auth in production
+- Least privilege for DB roles
+
+## Compliance
+
+- Respect Wikidata/Wikipedia usage guidelines and rate limits
+- Preserve required attribution in downstream usage

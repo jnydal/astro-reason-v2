@@ -1,0 +1,13 @@
+---
+description: Extract skills and constraints from project documentation
+globs: ["**/*.md", "**/*.kt", "**/*.py"]
+alwaysApply: true
+---
+
+# Project Context
+Read these files before any task:
+- AGENT.md (agent instructions and constraints)
+- ARCHITECTURE.md (system design decisions)
+- NFR.md (non-functional requirements)
+- RUNBOOK.md (operational procedures)
+```

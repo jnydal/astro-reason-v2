@@ -50,7 +50,7 @@ Wikidata / Wikipedia enrichment:
 Resolver service (no queue; DB polling) takes name + date of birth → resolves a Wikidata QID → stores it → calls the `fetch-bio` Python service → Wikipedia biography text is written into `bio_text`. After each successful update, `fetch-bio` enqueues downstream jobs.
 
 Embeddings (semantic) – topic: `embeddings`:
-After wiki enrichment, the `fetch-bio` service enqueues batched jobs on the `embeddings` Kafka topic → Python embeddings worker pulls from `embeddings` → computes sentence-transformer embeddings → stores vectors in `embeddings_*` tables in PostgreSQL.
+After wiki enrichment, the `fetch-bio` service enqueues batched jobs on the `embeddings` Kafka topic → Python embeddings worker pulls from `embeddings` → computes sentence-transformer embeddings → stores vectors in `embeddings_*` tables in PostgreSQL. Set `EMBEDDINGS_REQUIRE_QID=true` to restrict embeddings to Wikipedia-enriched bios only.
 
 Astrological encoding – topic: `astro`:
 The astro worker consumes `"astro.compute_features"` jobs from Kafka, computes ephemeris‑based features (Swiss Ephemeris with Skyfield fallback) and stores structured astro features + a flat numeric feature vector in `astro_features`. After each successful write, it enqueues `"astro.interpret"` jobs on the same topic. The astro interpreter worker (Python, consumer group `astro-interpreter`) consumes those, calls the LLM to produce a short astrological reading from the chart data, and stores the result in `astro_interpretations`.

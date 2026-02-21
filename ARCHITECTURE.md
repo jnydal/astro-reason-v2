@@ -144,6 +144,8 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 
 **Model**: BAAI/bge-large-en-v1.5 (configurable)
 
+**Configuration**: `EMBEDDINGS_REQUIRE_QID` (default: `false`). When `true`, filters to people with `entity_link` (Wikidata QID) before computing embeddings; when `false`, any `bio_text` source is used.
+
 **Dependencies**: Database, Kafka
 
 ### 4. Resolver Service (`service/resolver`)
