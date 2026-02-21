@@ -101,10 +101,17 @@ services:
       # Faster but still polite defaults for Wikidata API
       WIKIDATA_MIN_INTERVAL_SEC: ${WIKIDATA_MIN_INTERVAL_SEC:-0.5}
       WIKIDATA_JITTER_SEC: ${WIKIDATA_JITTER_SEC:-0.1}
+      # Skip fetch-bio when embeddings-worker lag exceeds this (messages). 0 = disabled.
+      EMBEDDINGS_LAG_THRESHOLD: ${EMBEDDINGS_LAG_THRESHOLD:-100}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      KAFKA_EMBEDDINGS_TOPIC: ${KAFKA_EMBEDDINGS_TOPIC:-embeddings}
+      KAFKA_EMBEDDINGS_GROUP_ID: ${KAFKA_EMBEDDINGS_GROUP_ID:-embeddings-worker}
     depends_on:
       db:
         condition: service_healthy
       fetch-bio:
+        condition: service_started
+      kafka:
         condition: service_started
 
   fetch-bio:

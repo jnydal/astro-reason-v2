@@ -27,7 +27,12 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import java.time.format.DateTimeFormatter
 import java.util.*
+import java.util.Properties
 import kotlin.random.Random
+import org.apache.kafka.clients.admin.AdminClient
+import org.apache.kafka.clients.admin.AdminClientConfig
+import org.apache.kafka.clients.admin.OffsetSpec
+import org.apache.kafka.common.TopicPartition
 
 @Serializable
 data class WikidataSearchResult(
@@ -267,6 +272,64 @@ class QidResolver {
         println("✅ Resolved ${resolved.size} QIDs")
     }
     
+    /**
+     * Returns true if any ingest job (worker.ingest.parse_adb_xml) is QUEUED or STARTED.
+     * Used to gate fetch-bio: skip producing to embeddings topic while ingest is active,
+     * to avoid parallel producer load on Kafka.
+     */
+    fun hasActiveIngestJobs(): Boolean {
+        return transaction(DatabaseManager.getDatabase()) {
+            JobStatusTable.select {
+                (JobStatusTable.function eq "worker.ingest.parse_adb_xml") and
+                (JobStatusTable.status inList listOf("QUEUED", "STARTED"))
+            }.limit(1).firstOrNull() != null
+        }
+    }
+
+    /**
+     * Returns true if embeddings-worker consumer lag on embeddings topic exceeds threshold.
+     * Used to gate fetch-bio: wait for embeddings worker to drain backlog before adding more.
+     * If EMBEDDINGS_LAG_THRESHOLD is 0 or unset, always returns false (no lag check).
+     * On Kafka/Admin errors, returns false to avoid blocking fetch-bio.
+     */
+    fun hasHighEmbeddingsLag(): Boolean {
+        val threshold = System.getenv("EMBEDDINGS_LAG_THRESHOLD")?.toLongOrNull() ?: 0L
+        if (threshold <= 0) return false
+
+        val bootstrap = Config.settings.kafkaBootstrapServers
+        val topic = System.getenv("KAFKA_EMBEDDINGS_TOPIC") ?: "embeddings"
+        val groupId = System.getenv("KAFKA_EMBEDDINGS_GROUP_ID") ?: "embeddings-worker"
+
+        return try {
+            val props = Properties().apply {
+                put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap)
+                put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, 10000)
+            }
+            AdminClient.create(props).use { admin ->
+                val partitions = admin.describeTopics(listOf(topic)).all().get()[topic]?.partitions()
+                    ?: return@use false
+                val topicPartitions = partitions.map { TopicPartition(topic, it.partition()) }
+
+                if (topicPartitions.isEmpty()) return@use false
+
+                val committed = admin.listConsumerGroupOffsets(groupId).partitionsToOffsetAndMetadata().get()
+                val endSpecs = topicPartitions.associateWith { OffsetSpec.latest() }
+                val endOffsets = admin.listOffsets(endSpecs).all().get()
+
+                var totalLag = 0L
+                for (tp in topicPartitions) {
+                    val committedOffset = committed[tp]?.offset() ?: 0L
+                    val endOffset = endOffsets[tp]?.offset() ?: committedOffset
+                    totalLag += maxOf(0L, endOffset - committedOffset)
+                }
+                totalLag > threshold
+            }
+        } catch (e: Exception) {
+            println("⚠️ Could not check embeddings lag (Kafka Admin): ${e.message}. Allowing fetch-bio.")
+            false
+        }
+    }
+
     @Serializable
     data class FetchBioRequest(
         val lang: String = "en",
@@ -338,9 +401,18 @@ fun main() {
         try {
             kotlinx.coroutines.runBlocking {
                 resolver.resolveQids(resolveLimit)
-                
-                // After resolving QIDs, fetch Wikipedia biographies via HTTP API
-                resolver.triggerFetchBio("en", resolveLimit)
+
+                // Fetch Wikipedia biographies only when: (1) no ingest job is active,
+                // and (2) embeddings worker has caught up (lag below threshold).
+                // This serializes embeddings production and avoids adding to backlog.
+                when {
+                    resolver.hasActiveIngestJobs() ->
+                        println("⏭ Skipping fetch-bio: ingest job(s) active")
+                    resolver.hasHighEmbeddingsLag() ->
+                        println("⏭ Skipping fetch-bio: embeddings topic lag above threshold")
+                    else ->
+                        resolver.triggerFetchBio("en", resolveLimit)
+                }
             }
 
             if (resolveOnce) {

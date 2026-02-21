@@ -60,8 +60,10 @@ watch -n 2 "curl -s http://localhost:8000/jobs/$JOB_ID | jq .status"
 The Resolver service runs automatically:
 - Finds people without QIDs
 - Resolves to Wikidata
-- Calls fetch-bio API
+- Calls fetch-bio API (when no ingest job is active)
 - Fetches Wikipedia biographies
+
+**Fetch-bio gating**: Resolver skips the fetch-bio call when (1) any ingest job is QUEUED or STARTED, or (2) embeddings-worker lag on the embeddings topic exceeds `EMBEDDINGS_LAG_THRESHOLD` (default 100). This serializes embeddings production and waits for the embeddings worker to drain before adding more. QID resolution continues every cycle; only fetch-bio is deferred. Log messages: `Skipping fetch-bio: ingest job(s) active` or `Skipping fetch-bio: embeddings topic lag above threshold`.
 
 **Monitor**:
 ```bash
@@ -80,6 +82,8 @@ WIKIDATA_MIN_INTERVAL_SEC=1.0
 WIKIDATA_JITTER_SEC=0.2
 WIKIPEDIA_MIN_INTERVAL_SEC=1.0
 WIKIPEDIA_JITTER_SEC=0.2
+# Skip fetch-bio when embeddings-worker lag exceeds this (0 = disabled)
+EMBEDDINGS_LAG_THRESHOLD=100
 ```
 
 Safe schedule suggestion:
@@ -446,13 +450,17 @@ WHERE bt.text IS NOT NULL AND LENGTH(TRIM(bt.text)) > 0
   );
 ```
 
-If this returns a positive number, run the **embeddings backfill** to enqueue jobs for those people:
+If this returns a positive number, run one of:
 
-```bash
-docker compose run --rm embeddings python -m app.enqueue_embeddings_backfill
-```
-
-Ensure the embeddings worker is running to process the queue: `docker compose logs -f embeddings`.
+- **Sync backfill** (recommended when Kafka backfill has failed repeatedly): processes directly, no Kafka. **Resumable**: skips already-embedded people; safe to re-run after failures or Ctrl+C.
+  ```bash
+  docker compose run --rm embeddings python -m app.run_embeddings_backfill_sync
+  ```
+- **Kafka backfill**: enqueues jobs; worker must be running to process
+  ```bash
+  docker compose run --rm embeddings python -m app.enqueue_embeddings_backfill
+  docker compose logs -f embeddings   # ensure worker is running
+  ```
 
 **Speed up Resolver** (when upstream QID resolution is the bottleneck):
 
@@ -461,6 +469,11 @@ Ensure the embeddings worker is running to process the queue: `docker compose lo
 3. Keep resolver running; it processes a batch every 60 seconds
 
 **Note**: Embeddings are computed for all people with bio_text (XML stubs or Wikipedia). Use the correlation endpoint's `embeddingsScope=qid_only` to restrict correlation analysis to wiki-enriched people.
+
+**Lag 0 but embeddings count still low** (jobs consumed but total embeddings far below expected):
+
+- **Ingest and fetch-bio now skip people who already have embeddings** — no duplicate jobs. One backfill run should process all remaining people.
+- **Sync backfill** (bypasses Kafka, resumable): `docker compose run --rm embeddings python -m app.run_embeddings_backfill_sync` — use if Kafka backfill still fails.
 
 ## XML / ADB Data: Domain Rules
 

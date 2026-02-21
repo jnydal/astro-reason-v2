@@ -204,11 +204,19 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
             }
         }
 
-        // Enqueue embeddings for persons with inline XML bio text (fetch-bio will also
-        // enqueue for wiki-enriched bios; embeddings worker is idempotent).
+        // Enqueue embeddings only for persons who don't already have them (avoid duplicate jobs).
         val embedBatchSize = 500
-        if (bioPids.isNotEmpty()) {
-            for (batch in bioPids.chunked(embedBatchSize)) {
+        val toEnqueueEmbed = if (bioPids.isNotEmpty()) {
+            transaction(DatabaseManager.getDatabase()) {
+                val hasAny = (Embeddings384.slice(Embeddings384.personId).select { Embeddings384.personId inList bioPids.toList() }.map { it[Embeddings384.personId] }.toSet() +
+                    Embeddings768.slice(Embeddings768.personId).select { Embeddings768.personId inList bioPids.toList() }.map { it[Embeddings768.personId] }.toSet() +
+                    Embeddings1024.slice(Embeddings1024.personId).select { Embeddings1024.personId inList bioPids.toList() }.map { it[Embeddings1024.personId] }.toSet() +
+                    Embeddings1536.slice(Embeddings1536.personId).select { Embeddings1536.personId inList bioPids.toList() }.map { it[Embeddings1536.personId] }.toSet())
+                bioPids.filter { it !in hasAny }
+            }
+        } else emptyList()
+        if (toEnqueueEmbed.isNotEmpty()) {
+            for (batch in toEnqueueEmbed.chunked(embedBatchSize)) {
                 embeddingsQueue.enqueue(
                     function = "embeddings.embed_person_bios",
                     kwargs = mapOf(
@@ -230,7 +238,7 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
                 "source" to source,
                 "object_uri" to objectUri,
                 "astro_jobs" to astroPids.size.toString(),
-                "embedding_jobs" to bioPids.size.toString()
+                "embedding_jobs" to toEnqueueEmbed.size.toString()
             )
         )
         

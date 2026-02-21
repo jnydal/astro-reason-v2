@@ -18,6 +18,8 @@ alwaysApply: true
 
 **Invariant**: Embeddings are enqueued from **ingest** (for persons with inline XML bio) and **fetch-bio** (for wiki-enriched bios). The embeddings worker is idempotent.
 
+**Invariant**: Resolver skips fetch-bio when (1) any ingest job (`worker.ingest.parse_adb_xml`) is QUEUED or STARTED, or (2) embeddings-worker lag on the embeddings topic exceeds `EMBEDDINGS_LAG_THRESHOLD`. This serializes embeddings production and waits for the embeddings worker to drain before adding more.
+
 ## Kafka Topics
 
 | Topic       | Producer(s)           | Consumer(s)                    |

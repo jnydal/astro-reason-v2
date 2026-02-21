@@ -10,6 +10,7 @@ application {
 
 dependencies {
     implementation(project(":service:core"))
+    implementation("org.apache.kafka:kafka-clients:3.6.1")
     
     // Ktor HTTP client
     implementation("io.ktor:ktor-client-core:2.3.7")

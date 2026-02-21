@@ -101,19 +101,40 @@ def embed_person_bios(payload: dict, heartbeat=None):
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     # Fetch texts that need embeddings (missing or text_hash changed)
-    cur.execute("""
-        SELECT bt.person_id, bt.text, bt.text_hash, e.text_hash AS existing_hash
-        FROM bio_text bt
-        LEFT JOIN embeddings e
-          ON e.person_id = bt.person_id AND e.model_name = %s
-        WHERE bt.person_id = ANY(%s::uuid[])
-    """, (model_name, person_ids))
-    rows = cur.fetchall()
+    # Use tuple + IN for reliable UUID matching (psycopg2 ANY/array can be flaky with uuid[])
+    # Deduplicate by person_id: prefer wiki (rev_id>0) over ingest stub (rev_id=0), then longer text
+    if not person_ids:
+        rows = []
+    else:
+        cur.execute(
+            """
+            SELECT DISTINCT ON (bt.person_id)
+                   bt.person_id, bt.text, bt.text_hash, e.text_hash AS existing_hash
+            FROM bio_text bt
+            LEFT JOIN embeddings e
+              ON e.person_id = bt.person_id AND e.model_name = %s
+            WHERE bt.person_id IN %s
+              AND bt.text IS NOT NULL AND LENGTH(TRIM(bt.text)) > 0
+            ORDER BY bt.person_id,
+                     COALESCE(bt.rev_id, 0) DESC,
+                     COALESCE(bt.char_count, LENGTH(bt.text)) DESC NULLS LAST
+            """,
+            (model_name, tuple(person_ids)),
+        )
+        rows = cur.fetchall()
 
     # Filter only new or changed bios
     todo = [r for r in rows if not r["existing_hash"] or r["existing_hash"] != r["text_hash"]]
+
+    # Diagnostic: log when we get far fewer rows than person_ids (possible query/format issue)
+    distinct_in_rows = len(set(r["person_id"] for r in rows)) if rows else 0
+    if len(person_ids) > 0 and len(rows) == 0:
+        print(f"⚠️ Job had {len(person_ids)} person_ids but query returned 0 rows from bio_text. Check DB connectivity and schema.")
+    elif len(person_ids) > 0 and distinct_in_rows < len(person_ids) * 0.5:
+        print(f"⚠️ Job had {len(person_ids)} person_ids but only {distinct_in_rows} distinct persons in bio_text. Possible missing data.")
+
     if not todo:
-        print("No new or changed bios to embed.")
+        print(f"No new or changed bios to embed. (person_ids={len(person_ids)}, rows={len(rows)}, already_embedded={len(rows) - len(todo)})")
         log_event(
             cur,
             stage="embeddings",

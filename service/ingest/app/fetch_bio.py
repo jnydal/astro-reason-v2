@@ -184,12 +184,13 @@ def run(dsn, lang="en", limit=500):
         else:
             combined_source = f"fetch_bio:{lang}"
 
+        # Update stub row in place; do NOT change rev_id (avoids PK violation when
+        # a row with wiki rev_id already exists from a previous fetch).
         cur.execute(
             """
           UPDATE bio_text
              SET lang=%s,
                  wiki_pageid=%s,
-                 rev_id=%s,
                  url=%s,
                  license=%s,
                  text=%s,
@@ -205,7 +206,6 @@ def run(dsn, lang="en", limit=500):
             (
                 lang,
                 page_id,
-                rev or 0,
                 page_url,
                 "CC BY-SA 4.0 (Wikipedia)",
                 combined_text,
@@ -258,7 +258,10 @@ def run(dsn, lang="en", limit=500):
 
     conn.commit()
 
-    # Batch enqueue embeddings job(s) for all enriched bios
+    # Enqueue everyone we enriched. The embeddings worker is idempotent: it will
+    # noop when text_hash is unchanged and overwrite when bio_text changed.
+    # This supports backfills: embed stubs first, then fetch-bio enriches, then
+    # re-embed with higher-quality Wikipedia text.
     if enriched_ids:
         job_id = str(uuid.uuid4())
         now_ms = int(time.time() * 1000)

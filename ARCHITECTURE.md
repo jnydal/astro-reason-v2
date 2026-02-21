@@ -166,7 +166,9 @@ Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia).
 2. Search Wikidata API
 3. Match by date of birth (P569); no fallback without DOB match
 4. Store QID in `bio_text`
-5. Call fetch-bio API
+5. Call fetch-bio API (gated: only when no ingest job is QUEUED or STARTED)
+
+**Fetch-bio gating**: Resolver skips the fetch-bio HTTP call when (1) any ingest job (`worker.ingest.parse_adb_xml`) is QUEUED or STARTED, or (2) `embeddings-worker` consumer lag on the `embeddings` topic exceeds `EMBEDDINGS_LAG_THRESHOLD` (default 100). This serializes embeddings production: ingest produces first, embeddings worker drains, then fetch-bio adds more. QID resolution (steps 1–4) continues every cycle regardless.
 
 **Skip logic**: Skips non-person entries (events, accidents, disasters, roles) that won't resolve to a person with matching birth data. See RUNBOOK "ADB Export Edge Cases (Resolver Skip Logic)" for patterns and examples.
 
