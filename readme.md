@@ -50,13 +50,13 @@ Wikidata / Wikipedia enrichment:
 Resolver service (no queue; DB polling) takes name + date of birth → resolves a Wikidata QID → stores it → calls the `fetch-bio` Python service → Wikipedia biography text is written into `bio_text`. After each successful update, `fetch-bio` enqueues downstream jobs.
 
 Embeddings (semantic) – topic: `embeddings`:
-After wiki enrichment, the `fetch-bio` service enqueues batched jobs on the `embeddings` Kafka topic → Python embeddings worker pulls from `embeddings` → computes sentence-transformer embeddings → stores vectors in `embeddings_*` tables in PostgreSQL. Use the `enqueue_embeddings_backfill` script to embed XML-only bios. Use `embeddingsScope=qid_only` on the correlation endpoint to restrict analysis to wiki-enriched people.
+The ingest worker enqueues embedding jobs for persons with inline XML bio text. The `fetch-bio` service also enqueues for wiki-enriched bios. The Python embeddings worker pulls from `embeddings` → computes sentence-transformer embeddings → stores vectors in `embeddings_*` tables. Use `enqueue_embeddings_backfill` to catch any gaps (e.g. jobs lost). Use `embeddingsScope=qid_only` on the correlation endpoint to restrict analysis to wiki-enriched people.
 
 Astrological encoding – topic: `astro`:
 The astro worker consumes `"astro.compute_features"` jobs from Kafka, computes ephemeris‑based features (Swiss Ephemeris with Skyfield fallback) and stores structured astro features + a flat numeric feature vector in `astro_features`. After each successful write, it enqueues `"astro.interpret"` jobs on the same topic. The astro interpreter worker (Python, consumer group `astro-interpreter`) consumes those, calls the LLM to produce a short astrological reading from the chart data, and stores the result in `astro_interpretations`.
 
 Storage & analysis:
-PostgreSQL is the source of truth for people, births, bios, embeddings, astro features, and astro interpretations. Kafka is used as the job queue (`default` → ingest, `embeddings` after wiki enrichment, `astro` for features and interpretations, `stats` for correlation jobs). Embeddings are computed for all people with bio_text (XML or Wikipedia). Correlation uses embeddings ↔ astro feature_vec; use `embeddingsScope=qid_only` to restrict to wiki-enriched people. Interpretations are stored for future semantic comparison with biography embeddings. For astro-features mode, the stats worker also computes correlations on **birth-year–detrended** embeddings (linear regression residuals per dimension) so you can compare `featureImportance` (original) with `featureImportanceDetrended` and distinguish real astrological signals from spurious cohort effects (e.g. slow-moving outer planets acting as generation proxies).
+PostgreSQL is the source of truth for people, births, bios, embeddings, astro features, and astro interpretations. Kafka is used as the job queue (`default` → ingest, `embeddings` from ingest and fetch-bio, `astro` for features and interpretations, `stats` for correlation jobs). Embeddings are computed for all people with bio_text (XML or Wikipedia). Correlation uses embeddings ↔ astro feature_vec; use `embeddingsScope=qid_only` to restrict to wiki-enriched people. Interpretations are stored for future semantic comparison with biography embeddings. For astro-features mode, the stats worker also computes correlations on **birth-year–detrended** embeddings (linear regression residuals per dimension) so you can compare `featureImportance` (original) with `featureImportanceDetrended` and distinguish real astrological signals from spurious cohort effects (e.g. slow-moving outer planets acting as generation proxies).
 
 
 ### System Components
@@ -140,7 +140,7 @@ curl http://localhost:8001/api/tags
 1. Upload AstroDatabank dataset via frontend or API
 2. Trigger enrichment (Wikipedia fetch)
 3. Run batch processing:
-   - Embeddings (after fetch-bio enqueues)
+   - Embeddings (ingest enqueues for XML bio; fetch-bio enqueues for wiki-enriched)
    - Astro encoding (ingest enqueues); astro interpreter runs after features are written
 
 Each processing step logs a provenance record for reproducibility.

@@ -28,9 +28,16 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
     
     val settings = Config.settings
     val astroTopic = System.getenv("KAFKA_ASTRO_TOPIC") ?: "astro"
+    val embeddingsTopic = System.getenv("KAFKA_EMBEDDINGS_TOPIC") ?: "embeddings"
     val astroQueue = createJobQueue(
         settings.kafkaBootstrapServers,
         astroTopic,
+        groupId = null,
+        clientId = "worker-ingest"
+    )
+    val embeddingsQueue = createJobQueue(
+        settings.kafkaBootstrapServers,
+        embeddingsTopic,
         groupId = null,
         clientId = "worker-ingest"
     )
@@ -60,6 +67,7 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
         val parser = XmlParser()
         val touchedPids = mutableSetOf<UUID>()
         val astroPids = mutableSetOf<UUID>()
+        val bioPids = mutableSetOf<UUID>()
         var recordsSeen = 0
         
         transaction(DatabaseManager.getDatabase()) {
@@ -165,6 +173,7 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
                 
                 // Bio text
                 if (!rec.bioText.isNullOrBlank()) {
+                    bioPids.add(personId)
                     bioBatch.add(personId to BioData(
                         personId = personId,
                         text = rec.bioText,
@@ -185,14 +194,28 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
             commit()
         }
         
-        // Note: semantic embeddings are now triggered after wiki enrichment
-        // from the fetch-bio service, to ensure they run on full biographies.
         if (astroPids.isNotEmpty()) {
             for (personId in astroPids) {
                 astroQueue.enqueue(
                     function = "astro.compute_features",
                     personId.toString(),
                     kwargs = mapOf("source" to source)
+                )
+            }
+        }
+
+        // Enqueue embeddings for persons with inline XML bio text (fetch-bio will also
+        // enqueue for wiki-enriched bios; embeddings worker is idempotent).
+        val embedBatchSize = 500
+        if (bioPids.isNotEmpty()) {
+            for (batch in bioPids.chunked(embedBatchSize)) {
+                embeddingsQueue.enqueue(
+                    function = "embeddings.embed_person_bios",
+                    kwargs = mapOf(
+                        "person_ids" to batch.joinToString(",") { it.toString() },
+                        "model" to settings.embeddingsModel,
+                        "source" to "ingest:$source"
+                    )
                 )
             }
         }
@@ -206,7 +229,8 @@ fun parseAdbXml(objectUri: String, meta: Map<String, String>) {
             meta = mapOf(
                 "source" to source,
                 "object_uri" to objectUri,
-                "astro_jobs" to astroPids.size.toString()
+                "astro_jobs" to astroPids.size.toString(),
+                "embedding_jobs" to bioPids.size.toString()
             )
         )
         

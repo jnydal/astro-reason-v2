@@ -61,10 +61,19 @@ def _chunked(items, chunk_size: int):
         yield items[i:i + chunk_size]
 
 
+def _normalize_person_ids(person_ids) -> list:
+    """Accept person_ids as list (fetch-bio, backfill) or comma-separated string (ingest)."""
+    if not person_ids:
+        return []
+    if isinstance(person_ids, str):
+        return [x.strip() for x in person_ids.split(",") if x.strip()]
+    return list(person_ids)
+
+
 def embed_person_bios(payload: dict, heartbeat=None):
     """Kafka job: Embed bios for given person_ids and upsert into embeddings table."""
     started = time.monotonic()
-    person_ids = payload.get("person_ids") or []
+    person_ids = _normalize_person_ids(payload.get("person_ids"))
     model_name = payload.get("model", EMBED_MODEL)
     source = payload.get("source", "astrodb-upload")
 

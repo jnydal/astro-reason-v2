@@ -52,7 +52,8 @@ watch -n 2 "curl -s http://localhost:8000/jobs/$JOB_ID | jq .status"
 2. Enqueues job in Kafka (`default` topic)
 3. Worker-ingest processes XML
 4. Inserts into `person_raw`, `birth`, `bio_text`
-5. Enqueues `astro.compute_features` jobs to `astro` topic (embeddings are enqueued later by fetch-bio after wiki enrichment)
+5. Enqueues `astro.compute_features` jobs to `astro` topic
+6. Enqueues embedding jobs to `embeddings` topic for persons with inline XML bio text (fetch-bio also enqueues for wiki-enriched bios)
 
 ### Step 2: Resolve & Enrich
 
@@ -413,7 +414,7 @@ docker compose restart astro astro-interpreter resolver
 
 ### Pipeline "Stopped" at N People (Embeddings Not Growing)
 
-Embeddings depend on: **Resolver** (assigns Wikidata QID) → **fetch_bio** (fetches Wikipedia) → **embeddings worker**.
+Embeddings: **ingest** enqueues for persons with inline XML bio; **Resolver** → **fetch_bio** enqueues for wiki-enriched bios; **embeddings worker** consumes both.
 
 The Resolver processes **RESOLVE_LIMIT** people per minute (default **50** in docker-compose). For a full AstroDatabank dataset (~30k), that’s 10+ hours at default.
 

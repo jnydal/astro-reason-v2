@@ -36,7 +36,8 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 
 1. Ingest Worker
    ├─→ Parses XML → PostgreSQL (person_raw, birth, bio_text)
-   └─→ No embeddings enqueued here (waits for wiki enrichment)
+   ├─→ Enqueues `astro.compute_features` to `astro` topic
+   └─→ Enqueues embedding jobs to `embeddings` topic for persons with inline XML bio text
 
 2. Embeddings Worker (Python)
    ├─→ Reads from Kafka (embeddings topic)
@@ -124,9 +125,10 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - Parse AstroDatabank XML files
 - Extract person, birth, and biography data
 - Batch insert into PostgreSQL
-- Enqueue `astro.compute_features` to `astro` topic (does **not** enqueue embeddings; embeddings are enqueued by fetch-bio after wiki enrichment)
+- Enqueue `astro.compute_features` to `astro` topic
+- Enqueue embedding jobs to `embeddings` topic for persons with non-empty inline XML bio text (fetch-bio also enqueues for wiki-enriched bios; embeddings worker is idempotent)
 
-**Note**: A deprecated Python implementation (`service/worker_ingest`) exists but enqueues embeddings directly and violates the pipeline invariants. See `service/worker_ingest/DEPRECATED.md`.
+**Note**: A deprecated Python implementation (`service/worker_ingest`) exists. See `service/worker_ingest/DEPRECATED.md`.
 
 **Key Components**:
 - `XmlParser.kt` - Streaming XML parser (StAX)
@@ -239,7 +241,7 @@ Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia).
    
 2. Parse & Ingest
    API → Kafka Topic → Worker-Ingest → PostgreSQL
-   (Embeddings are enqueued after wiki enrichment)
+   Worker-Ingest → Kafka Topic (embeddings) for persons with inline XML bio text
    
 3. Resolve QIDs
    Resolver → Wikidata API → PostgreSQL
@@ -280,7 +282,8 @@ Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia).
 
 ### Asynchronous (Kafka Topics)
 - API → Worker-Ingest (`default` topic)
-- Fetch-Bio → Embeddings Worker (`embeddings` topic)
+- Worker-Ingest → Embeddings Worker (`embeddings` topic, for persons with inline XML bio)
+- Fetch-Bio → Embeddings Worker (`embeddings` topic, for wiki-enriched bios)
 - Worker-Ingest → Astro Worker (`astro` topic, `astro.compute_features`)
 - Astro Worker → Astro Interpreter (`astro` topic, `astro.interpret` jobs)
 - API → Stats Worker (`stats` topic)

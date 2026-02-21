@@ -8,22 +8,22 @@ alwaysApply: true
 ## Pipeline Order (Do Not Change)
 
 1. **Upload XML** → API stores in MinIO, enqueues to Kafka `default`
-2. **Worker-Ingest** → Parses XML, inserts `person_raw`, `birth`, `bio_text`; enqueues `astro.compute_features` to `astro`
+2. **Worker-Ingest** → Parses XML, inserts `person_raw`, `birth`, `bio_text`; enqueues `astro.compute_features` to `astro`; **enqueues to `embeddings` for persons with inline XML bio text**
 3. **Resolver** → Resolves QIDs, calls fetch-bio API
-4. **Fetch-Bio** → Fetches Wikipedia bios, updates `bio_text`, **enqueues to `embeddings`**
+4. **Fetch-Bio** → Fetches Wikipedia bios, updates `bio_text`, **enqueues to `embeddings` for wiki-enriched bios**
 5. **Embeddings Worker** → Generates vectors, writes `embeddings_*`
 6. **Astro Service** → Computes features → `astro_features`, enqueues `astro.interpret` to `astro`
 7. **Astro Interpreter** → LLM reading → `astro_interpretations`
 8. **Stats Worker** → Correlations → `job_status`, MinIO
 
-**Invariant**: Embeddings are enqueued **from fetch-bio** (after wiki enrichment), NOT from ingest.
+**Invariant**: Embeddings are enqueued from **ingest** (for persons with inline XML bio) and **fetch-bio** (for wiki-enriched bios). The embeddings worker is idempotent.
 
 ## Kafka Topics
 
-| Topic       | Producer(s)     | Consumer(s)                    |
-|-------------|-----------------|--------------------------------|
-| default     | API             | worker-ingest                  |
-| embeddings  | fetch-bio       | embeddings worker              |
+| Topic       | Producer(s)           | Consumer(s)                    |
+|-------------|-----------------------|--------------------------------|
+| default     | API                   | worker-ingest                  |
+| embeddings  | worker-ingest, fetch-bio | embeddings worker           |
 | astro       | worker-ingest, astro | astro-worker, astro-interpreter |
 | stats       | API             | stats-worker                   |
 
@@ -44,7 +44,6 @@ alwaysApply: true
 
 ## Do NOT
 
-- Enqueue embeddings from ingest before wiki enrichment
 - Change consumer group assignments without updating ARCHITECTURE.md
 - Bypass `job_status` for async jobs (every job must have a row; status lookups use the table)
 - Add DB tables without migration in `infra/sql/`
