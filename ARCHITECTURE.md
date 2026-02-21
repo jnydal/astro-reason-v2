@@ -124,7 +124,9 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - Parse AstroDatabank XML files
 - Extract person, birth, and biography data
 - Batch insert into PostgreSQL
-- Enqueue embedding jobs (after wiki enrichment, via fetch-bio)
+- Enqueue `astro.compute_features` to `astro` topic (does **not** enqueue embeddings; embeddings are enqueued by fetch-bio after wiki enrichment)
+
+**Note**: A deprecated Python implementation (`service/worker_ingest`) exists but enqueues embeddings directly and violates the pipeline invariants. See `service/worker_ingest/DEPRECATED.md`.
 
 **Key Components**:
 - `XmlParser.kt` - Streaming XML parser (StAX)
@@ -272,12 +274,14 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 ### Synchronous (HTTP)
 - Client ↔ API
 - Resolver ↔ Fetch-Bio API
-- Traits Worker ↔ Ollama
+- Astro Interpreter ↔ Ollama
 
 ### Asynchronous (Kafka Topics)
-- API → Worker-Ingest
-- Worker-Ingest → Embeddings Worker
-- Fetch-Bio → Traits Worker
+- API → Worker-Ingest (`default` topic)
+- Fetch-Bio → Embeddings Worker (`embeddings` topic)
+- Worker-Ingest → Astro Worker (`astro` topic, `astro.compute_features`)
+- Astro Worker → Astro Interpreter (`astro` topic, `astro.interpret` jobs)
+- API → Stats Worker (`stats` topic)
 
 ### Database (PostgreSQL)
 - All services read/write to shared database
@@ -314,7 +318,15 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 ### Queue Management
 - Kafka-based job queues
 - Multiple workers can consume from same topic using consumer groups
-- Job status tracking in PostgreSQL (`job_status`)
+
+### Job Lifecycle: job_status vs Kafka
+
+- **`job_status` (PostgreSQL)**: Source of truth for job lifecycle (QUEUED → STARTED → FINISHED/FAILED). All async jobs must have a row here.
+- **Kafka**: Transport layer. Messages are sent to topics; workers consume and process.
+- **Enqueue flow**: Producer inserts a row into `job_status` (status=QUEUED), then publishes the job payload to the appropriate Kafka topic.
+- **Processing flow**: Worker consumes from Kafka, updates `job_status` to STARTED, runs the job, then updates to FINISHED or FAILED.
+- **Status lookup**: API and clients query `job_status` by job ID to get current status, result, or error. Kafka is not queried for status.
+- **Invariant**: Do not create async jobs that bypass `job_status`; every job must be trackable there.
 
 ### Resource Requirements
 - **CPU**: Moderate (LLM inference is CPU-bound)
@@ -341,6 +353,5 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 ## Future Enhancements
 
 1. **Swiss Ephemeris JNI**: Full implementation for accurate astro calculations
-4. **Metrics Export**: Prometheus integration
-5. **Distributed Tracing**: OpenTelemetry support
-6. **Statistical Analysis**: Correlation computation service
+2. **Metrics Export**: Prometheus integration
+3. **Distributed Tracing**: OpenTelemetry support

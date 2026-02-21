@@ -52,7 +52,7 @@ watch -n 2 "curl -s http://localhost:8000/jobs/$JOB_ID | jq .status"
 2. Enqueues job in Kafka (`default` topic)
 3. Worker-ingest processes XML
 4. Inserts into `person_raw`, `birth`, `bio_text`
-5. Enqueues embedding jobs
+5. Enqueues `astro.compute_features` jobs to `astro` topic (embeddings are enqueued later by fetch-bio after wiki enrichment)
 
 ### Step 2: Resolve & Enrich
 

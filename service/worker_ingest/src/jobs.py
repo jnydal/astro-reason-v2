@@ -1,4 +1,7 @@
 # worker/ingest.py
+# DEPRECATED: This Python ingest worker enqueues embeddings directly, violating the architecture
+# invariant that embeddings are enqueued only from fetch-bio. Use the Kotlin worker-ingest
+# (service/worker-ingest) instead. See DEPRECATED.md in this directory.
 import json
 import os
 import hashlib

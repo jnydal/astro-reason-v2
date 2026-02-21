@@ -37,9 +37,14 @@ alwaysApply: true
 - `provenance_event` — audit
 - `job_status` — job lifecycle
 
+## Job Status vs Kafka
+
+- **job_status** (PostgreSQL) is the source of truth for job lifecycle. Enqueue = insert row + publish to Kafka. Workers update `job_status` as they process. Status lookups query `job_status` by ID, not Kafka.
+- **Kafka** is the delivery mechanism; it is not queried for job status.
+
 ## Do NOT
 
 - Enqueue embeddings from ingest before wiki enrichment
 - Change consumer group assignments without updating ARCHITECTURE.md
-- Bypass `job_status` for async jobs
+- Bypass `job_status` for async jobs (every job must have a row; status lookups use the table)
 - Add DB tables without migration in `infra/sql/`
