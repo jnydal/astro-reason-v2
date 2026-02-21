@@ -476,6 +476,18 @@ If this returns a positive number, run one of:
 
 **Note**: Embeddings are computed for all people with bio_text (XML stubs or Wikipedia). Use the correlation endpoint's `embeddingsScope=qid_only` to restrict correlation analysis to wiki-enriched people.
 
+### Pending QID / Wiki Enrichment Stagnation
+
+If **pending QID resolution** and **pending wiki enrichment** stay flat for hours:
+
+1. **Check Resolver logs** for `Resolved X QIDs`:
+   ```bash
+   docker compose logs resolver --tail=50 | grep -E "Resolved|Skipping|Fetched"
+   ```
+   - If you see `Resolved 0 QIDs` every cycle, QID resolution is failing. A past bug: Wikidata P569 (birth date) values include numbers; `Map<String, String>` deserialization failed silently. The fix uses `JsonObject` to parse the mixed-type value. Ensure latest Resolver: `docker compose build resolver && docker compose up -d resolver`.
+
+2. **Wiki enrichment gating**: Resolver skips fetch-bio when (1) any ingest job is QUEUED/STARTED, or (2) embeddings lag > 100. Check ingest: `SELECT status FROM job_status WHERE function = 'worker.ingest.parse_adb_xml' AND status IN ('QUEUED','STARTED');` (should be empty). Check lag: `docker compose exec kafka rpk group describe embeddings-worker` (LAG should be 0).
+
 **Lag 0 but embeddings count still low** (jobs consumed but total embeddings far below expected):
 
 - **Ingest and fetch-bio now skip people who already have embeddings** — no duplicate jobs. One backfill run should process all remaining people.

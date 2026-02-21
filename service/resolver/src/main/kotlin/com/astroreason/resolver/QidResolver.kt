@@ -18,6 +18,8 @@ import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import java.time.Instant
@@ -73,7 +75,7 @@ data class WikidataMainSnak(
 
 @Serializable
 data class WikidataDataValue(
-    val value: Map<String, String> = emptyMap()
+    val value: JsonObject = JsonObject(emptyMap())
 )
 
 class QidResolver {
@@ -169,7 +171,8 @@ class QidResolver {
             
             val entity = response.entities[qid] ?: return false
             val birthDateClaim = entity.claims["P569"]?.firstOrNull() ?: return false
-            val timeValue = birthDateClaim.mainsnak?.datavalue?.value?.get("time") ?: return false
+            val timeElement = birthDateClaim.mainsnak?.datavalue?.value?.get("time") ?: return false
+            val timeValue = timeElement.jsonPrimitive.content
             
             dobIso == extractWikidataDate(timeValue)
         } catch (e: Exception) {
