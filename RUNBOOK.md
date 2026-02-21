@@ -196,6 +196,12 @@ docker compose up -d api stats-worker
 
 ## Database Queries
 
+### Pipeline Observability Dashboard
+
+The Grafana "Pipeline Observability" dashboard (see README) shows:
+- **Pending QID Resolution** — people with birth data but no Wikidata QID (resolver backlog)
+- **Pending Wiki Enrichment** — people with QIDs but not yet fetched from Wikipedia (fetch-bio backlog)
+
 ### Check Pipeline Progress
 
 ```sql
