@@ -149,7 +149,7 @@ def run(dsn, lang="en", limit=500):
             LIMIT 1
         ) bt ON TRUE
         WHERE COALESCE(el.qid, bt.qid) IS NOT NULL
-        ORDER BY (COALESCE(bt.source, '') LIKE '%fetch_bio%') ASC NULLS FIRST, pr.id ASC
+        ORDER BY (COALESCE(bt.source, '') LIKE '%%fetch_bio%%') ASC NULLS FIRST, pr.id ASC
     """
     if limit and int(limit) > 0:
         cur.execute(base_query + " LIMIT %s", (int(limit),))
