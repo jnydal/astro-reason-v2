@@ -30,7 +30,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minio123}
       MINIO_BUCKET_RAW: ${MINIO_BUCKET_RAW:-astro-raw}
     ports:
-      - "8000:8000"
+      - "8003:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -185,7 +185,7 @@ services:
       POSTGRES_INITDB_ARGS: "--encoding=UTF8"
       TZ: "Europe/Oslo"
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./infra/sql:/docker-entrypoint-initdb.d
@@ -199,7 +199,7 @@ services:
   kafka:
     image: redpandadata/redpanda:v23.3.10
     ports:
-      - "9092:9092"
+      - "9093:9092"
     volumes:
       - redpanda_data:/var/lib/redpanda/data
     command:
@@ -230,7 +230,7 @@ services:
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
@@ -246,8 +246,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio123}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9002:9000"
+      - "9003:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -263,7 +263,7 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
     ports:
-      - "3000:3000"
+      - "3001:3000"
     volumes:
       - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
       - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
