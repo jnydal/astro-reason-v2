@@ -102,7 +102,8 @@ def embed_person_bios(payload: dict, heartbeat=None):
 
     # Fetch texts that need embeddings (missing or text_hash changed)
     # Use tuple + IN for reliable UUID matching (psycopg2 ANY/array can be flaky with uuid[])
-    # Deduplicate by person_id: prefer wiki (rev_id>0) over ingest stub (rev_id=0), then longer text
+    # Deduplicate by person_id: prefer MOST RECENTLY UPDATED/RETRIEVED row (fetch-bio updates stubs
+    # in place; old rev_id ordering wrongly preferred stale wiki rows over updated stubs).
     if not person_ids:
         rows = []
     else:
@@ -116,7 +117,7 @@ def embed_person_bios(payload: dict, heartbeat=None):
             WHERE bt.person_id IN %s
               AND bt.text IS NOT NULL AND LENGTH(TRIM(bt.text)) > 0
             ORDER BY bt.person_id,
-                     COALESCE(bt.rev_id, 0) DESC,
+                     COALESCE(bt.retrieved_at, bt.updated_at) DESC NULLS LAST,
                      COALESCE(bt.char_count, LENGTH(bt.text)) DESC NULLS LAST
             """,
             (model_name, tuple(person_ids)),
@@ -125,6 +126,7 @@ def embed_person_bios(payload: dict, heartbeat=None):
 
     # Filter only new or changed bios
     todo = [r for r in rows if not r["existing_hash"] or r["existing_hash"] != r["text_hash"]]
+    skipped = [r for r in rows if r not in todo]
 
     # Diagnostic: log when we get far fewer rows than person_ids (possible query/format issue)
     distinct_in_rows = len(set(r["person_id"] for r in rows)) if rows else 0
@@ -134,19 +136,28 @@ def embed_person_bios(payload: dict, heartbeat=None):
         print(f"⚠️ Job had {len(person_ids)} person_ids but only {distinct_in_rows} distinct persons in bio_text. Possible missing data.")
 
     if not todo:
-        print(f"No new or changed bios to embed. (person_ids={len(person_ids)}, rows={len(rows)}, already_embedded={len(rows) - len(todo)})")
+        sample = [str(s["person_id"])[:8] for s in skipped[:5]] if skipped else []
+        print(
+            f"No new or changed bios to embed. person_ids={len(person_ids)}, rows={len(rows)}, "
+            f"skipped_as_unchanged={len(skipped)} (sample: {sample})"
+        )
         log_event(
             cur,
             stage="embeddings",
             status="ok",
             count=0,
             duration_ms=int((time.monotonic() - started) * 1000),
-            meta={"model": model_name, "source": source},
+            meta={
+                "model": model_name,
+                "source": source,
+                "skipped_unchanged": len(skipped),
+                "sample_person_ids": [str(s["person_id"])[:8] for s in skipped[:5]],
+            },
         )
         conn.commit()
         cur.close()
         conn.close()
-        return {"status": "noop", "count": 0}
+        return {"status": "noop", "count": 0, "skipped_unchanged": len(skipped)}
 
     model = SentenceTransformer(model_name)
     processed = 0

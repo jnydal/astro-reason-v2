@@ -202,6 +202,12 @@ The Grafana "Pipeline Observability" dashboard (see README) shows:
 - **Pending QID Resolution** — people with birth data but no Wikidata QID (resolver backlog)
 - **Pending Wiki Enrichment** — people with QIDs but not yet fetched from Wikipedia (fetch-bio backlog)
 
+**Core pipeline diagnostic** (QID resolution, wiki enrichment, re-embedded wiki-based progress):
+
+```bash
+./scripts/diagnose-core-pipeline.sh -UseDocker
+```
+
 ### Check Pipeline Progress
 
 ```sql
@@ -494,6 +500,16 @@ If **pending QID resolution** and **pending wiki enrichment** stay flat for hour
 
 - **Ingest and fetch-bio now skip people who already have embeddings** — no duplicate jobs. One backfill run should process all remaining people.
 - **Sync backfill** (bypasses Kafka, resumable): `docker compose run --rm embeddings python -m app.run_embeddings_backfill_sync` — use if Kafka backfill still fails.
+
+**Embeddings worker reports "No new or changed bios" when bio_text has changed**:
+
+- The embeddings worker picks the *most recently updated/retrieved* bio_text row per person (by `retrieved_at`, `updated_at`), not by `rev_id`. Fetch-bio updates stubs (rev_id=0) in place; a previous bug preferred stale wiki rows (rev_id>0) over updated stubs. If you see frequent noops, check `docker compose logs embeddings` — it now logs `skipped_unchanged` count and sample person_ids.
+
+**Fix already-affected people (stale embeddings)** — if embeddings were produced from the wrong row before the fix, run the stale re-embed backfill to update them:
+
+```bash
+docker compose run --rm embeddings python -m app.reembed_stale_sync
+```
 
 ## XML / ADB Data: Domain Rules
 
