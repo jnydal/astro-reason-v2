@@ -480,7 +480,7 @@ If this returns a positive number, run one of:
 2. Restart resolver: `docker compose restart resolver`
 3. Keep resolver running; it processes a batch every 60 seconds
 
-**Note**: Embeddings are computed for all people with bio_text (XML stubs or Wikipedia). Use the correlation endpoint's `embeddingsScope=qid_only` to restrict correlation analysis to wiki-enriched people.
+**Note**: Embeddings are computed for all people with bio_text (XML stubs or Wikipedia). Use the correlation endpoint's `embeddingsScope=qid_only` (proxy) or `embeddingsScope=wiki_only` (strict) to restrict correlation analysis to wiki-enriched people.
 
 ### Pending QID / Wiki Enrichment Stagnation
 
@@ -566,7 +566,8 @@ Project-specific test targets and edge cases. See `.cursor/rules/04-qa-checklist
 
 | Area | Edge case | Expected behavior |
 |------|-----------|-------------------|
-| Correlation | `embeddingsScope=qid_only` | Only embeddings from persons with entity_link (QID) included |
+| Correlation | `embeddingsScope=qid_only` | Persons with entity_link (QID) — proxy for wiki-enriched |
+| Correlation | `embeddingsScope=wiki_only` | Embeddings whose source contains `fetch_bio` — strictly wiki-enriched |
 | Astro | Missing ephemeris | Swiss Ephemeris → Skyfield fallback can yield different results |
 | Embeddings | Empty/blank bio_text | Skip embedding; no crash |
 | Embeddings | Unsupported dimension | Skip with warning (only 384, 768, 1024, 1536) |
@@ -578,5 +579,6 @@ Project-specific test targets and edge cases. See `.cursor/rules/04-qa-checklist
 - `mode=features`: astro features ↔ embeddings; includes birth-year detrending
 - `mode=interpretations`: interpretation embeddings ↔ astro interpretations
 - `embeddingsScope=all` (default): include all embeddings
-- `embeddingsScope=qid_only`: include only embeddings from persons with entity_link (wiki-enriched)
+- `embeddingsScope=qid_only`: include only persons with `entity_link` (resolved QID). Proxy for wiki-enriched; may include XML-only embeddings during pipeline lag or when fetch_bio fails.
+- `embeddingsScope=wiki_only`: include only embeddings whose `source` contains `fetch_bio` — strictly wiki-enriched bios.
 - Both analyses use same sample (people with known birth date)

@@ -113,7 +113,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - `GET /version` - Version information
 - `POST /ingest/astrodatabank` - Upload XML file
 - `GET /jobs/{jobId}` - Get job status
-- `GET /stats/correlation` - Enqueue correlation job (default mode: astro features; optional `?mode=interpretations`; optional `?embeddingsScope=all|qid_only` to restrict to persons with QID in `entity_link`)
+- `GET /stats/correlation` - Enqueue correlation job (default mode: astro features; optional `?mode=interpretations`; optional `?embeddingsScope=all|qid_only|wiki_only` to restrict scope)
 - `GET /stats/correlation/{jobId}` - Fetch correlation result/status. Result includes `featureImportance` (original) and, for features mode, `featureImportanceDetrended` (after birth-year detrending)
 
 **Dependencies**: Database, Kafka, MinIO
@@ -149,7 +149,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 
 **Model**: BAAI/bge-large-en-v1.5 (configurable)
 
-Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia). Use the correlation endpoint's `embeddingsScope=qid_only` parameter to restrict correlation analysis to persons with a QID in `entity_link` (typically wiki-enriched, but includes anyone resolved to Wikidata).
+Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia). Use the correlation endpoint's `embeddingsScope` parameter: `qid_only` (persons with QID in `entity_link` — proxy for wiki-enriched) or `wiki_only` (embeddings whose `source` contains `fetch_bio` — strictly wiki-enriched).
 
 **Dependencies**: Database, Kafka
 

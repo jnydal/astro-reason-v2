@@ -47,12 +47,13 @@ fun main() {
                         val limit = job.kwargs["limit"]?.toIntOrNull()
                         val minSamples = job.kwargs["minSamples"]?.toIntOrNull() ?: 3
                         val mode = job.kwargs["mode"]?.takeIf { it in setOf("features", "interpretations") } ?: "features"
-                        val embeddingsScope = job.kwargs["embeddingsScope"]?.takeIf { it in setOf("all", "qid_only") } ?: "all"
+                        val embeddingsScope = job.kwargs["embeddingsScope"]?.takeIf { it in setOf("all", "qid_only", "wiki_only") } ?: "all"
                         val qidOnly = embeddingsScope == "qid_only"
+                        val wikiOnly = embeddingsScope == "wiki_only"
 
                         val selection = when (mode) {
-                            "interpretations" -> loadEmbeddingInterpretationRowsForCorrelation(limit, qidOnly = qidOnly)
-                            else -> loadEmbeddingAstroRowsForCorrelation(limit, withBirthYear = true, qidOnly = qidOnly)
+                            "interpretations" -> loadEmbeddingInterpretationRowsForCorrelation(limit, qidOnly = qidOnly, wikiOnly = wikiOnly)
+                            else -> loadEmbeddingAstroRowsForCorrelation(limit, withBirthYear = true, qidOnly = qidOnly, wikiOnly = wikiOnly)
                         }
                         val allHaveBirthYear = selection.rows.isNotEmpty() && selection.rows.all { it.birthYear != null }
                         println("stats.correlation: mode=$mode, embeddingsScope=$embeddingsScope, rows=${selection.rows.size}, allHaveBirthYear=$allHaveBirthYear")

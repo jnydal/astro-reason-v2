@@ -172,11 +172,12 @@ fun Application.module() {
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull()
                 val minSamples = call.request.queryParameters["minSamples"]?.toIntOrNull() ?: 3
                 val mode = call.request.queryParameters["mode"]?.takeIf { it in setOf("features", "interpretations") } ?: "features"
-                val embeddingsScope = call.request.queryParameters["embeddingsScope"]?.takeIf { it in setOf("all", "qid_only") } ?: "all"
+                val embeddingsScope = call.request.queryParameters["embeddingsScope"]?.takeIf { it in setOf("all", "qid_only", "wiki_only") } ?: "all"
                 val qidOnly = embeddingsScope == "qid_only"
+                val wikiOnly = embeddingsScope == "wiki_only"
                 val selection = when (mode) {
-                    "interpretations" -> loadEmbeddingInterpretationRowsForCorrelation(limit, qidOnly = qidOnly)
-                    else -> loadEmbeddingAstroRowsForCorrelation(limit, qidOnly = qidOnly)
+                    "interpretations" -> loadEmbeddingInterpretationRowsForCorrelation(limit, qidOnly = qidOnly, wikiOnly = wikiOnly)
+                    else -> loadEmbeddingAstroRowsForCorrelation(limit, qidOnly = qidOnly, wikiOnly = wikiOnly)
                 }
                 if (selection.rows.isEmpty()) {
                     call.respond(FeatureImportanceResponse(entries = emptyList()))

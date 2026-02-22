@@ -85,13 +85,25 @@ fun loadEmbeddingAstroRows(limit: Int? = null, modelName: String? = null): List<
     }
 }
 
-fun loadEmbeddingAstroRowsForCorrelation(limit: Int? = null, withBirthYear: Boolean = false, qidOnly: Boolean = false): EmbeddingSelection {
+fun loadEmbeddingAstroRowsForCorrelation(
+    limit: Int? = null,
+    withBirthYear: Boolean = false,
+    qidOnly: Boolean = false,
+    wikiOnly: Boolean = false
+): EmbeddingSelection {
     return transaction(DatabaseManager.getDatabase()) {
         val selectedDim = EMBEDDING_DIM_PREFERENCE.firstOrNull { dim ->
             embeddingTableHasRows(dim)
         } ?: return@transaction EmbeddingSelection(0, emptyList())
 
-        val rows = loadEmbeddingAstroRowsForDim(selectedDim, limit, modelName = null, withBirthYear = withBirthYear, qidOnly = qidOnly)
+        val rows = loadEmbeddingAstroRowsForDim(
+            selectedDim,
+            limit,
+            modelName = null,
+            withBirthYear = withBirthYear,
+            qidOnly = qidOnly,
+            wikiOnly = wikiOnly
+        )
         EmbeddingSelection(selectedDim, rows)
     }
 }
@@ -101,13 +113,17 @@ fun loadEmbeddingAstroRowsForCorrelation(limit: Int? = null, withBirthYear: Bool
  * Joins embeddings with astro_interpretations; each row gets synthetic features
  * "interpretation" = 1.0 and "interpretation:&lt;modelName&gt;" = 1.0.
  */
-fun loadEmbeddingInterpretationRowsForCorrelation(limit: Int? = null, qidOnly: Boolean = false): EmbeddingSelection {
+fun loadEmbeddingInterpretationRowsForCorrelation(
+    limit: Int? = null,
+    qidOnly: Boolean = false,
+    wikiOnly: Boolean = false
+): EmbeddingSelection {
     return transaction(DatabaseManager.getDatabase()) {
         val selectedDim = EMBEDDING_DIM_PREFERENCE.firstOrNull { dim ->
             embeddingTableHasRows(dim)
         } ?: return@transaction EmbeddingSelection(0, emptyList())
 
-        val rows = loadEmbeddingInterpretationRowsForDim(selectedDim, limit, qidOnly = qidOnly)
+        val rows = loadEmbeddingInterpretationRowsForDim(selectedDim, limit, qidOnly = qidOnly, wikiOnly = wikiOnly)
         EmbeddingSelection(selectedDim, rows)
     }
 }
@@ -340,20 +356,21 @@ private fun loadEmbeddingAstroRowsForDim(
     limit: Int? = null,
     modelName: String? = null,
     withBirthYear: Boolean = false,
-    qidOnly: Boolean = false
+    qidOnly: Boolean = false,
+    wikiOnly: Boolean = false
 ): List<ClusterRow> {
-    val (personCol, modelCol, vectorCol, updatedCol, tableName) = when (dim) {
+    val (personCol, modelCol, vectorCol, updatedCol, sourceCol, tableName) = when (dim) {
         1024 -> EmbeddingColumns(
-            Embeddings1024.personId, Embeddings1024.modelName, Embeddings1024.vector, Embeddings1024.updatedAt, Embeddings1024.tableName
+            Embeddings1024.personId, Embeddings1024.modelName, Embeddings1024.vector, Embeddings1024.updatedAt, Embeddings1024.sourceCol, Embeddings1024.tableName
         )
         768 -> EmbeddingColumns(
-            Embeddings768.personId, Embeddings768.modelName, Embeddings768.vector, Embeddings768.updatedAt, Embeddings768.tableName
+            Embeddings768.personId, Embeddings768.modelName, Embeddings768.vector, Embeddings768.updatedAt, Embeddings768.sourceCol, Embeddings768.tableName
         )
         384 -> EmbeddingColumns(
-            Embeddings384.personId, Embeddings384.modelName, Embeddings384.vector, Embeddings384.updatedAt, Embeddings384.tableName
+            Embeddings384.personId, Embeddings384.modelName, Embeddings384.vector, Embeddings384.updatedAt, Embeddings384.sourceCol, Embeddings384.tableName
         )
         1536 -> EmbeddingColumns(
-            Embeddings1536.personId, Embeddings1536.modelName, Embeddings1536.vector, Embeddings1536.updatedAt, Embeddings1536.tableName
+            Embeddings1536.personId, Embeddings1536.modelName, Embeddings1536.vector, Embeddings1536.updatedAt, Embeddings1536.sourceCol, Embeddings1536.tableName
         )
         else -> return emptyList()
     }
@@ -374,12 +391,18 @@ private fun loadEmbeddingAstroRowsForDim(
         baseJoin
             .join(Birth, org.jetbrains.exposed.sql.JoinType.INNER, AstroFeatures.id, Birth.id)
             .slice(personCol, modelCol, vectorCol, updatedCol, AstroFeatures.featureVec, Birth.date)
-            .select { if (modelName != null) modelCol eq modelName else modelCol.isNotNull() }
+            .select {
+                val base = if (modelName != null) modelCol eq modelName else modelCol.isNotNull()
+                if (wikiOnly) base and (sourceCol like "%fetch_bio%") else base
+            }
             .orderBy(updatedCol, SortOrder.DESC_NULLS_LAST)
     } else {
         baseJoin
             .slice(personCol, modelCol, vectorCol, updatedCol, AstroFeatures.featureVec)
-            .select { if (modelName != null) modelCol eq modelName else modelCol.isNotNull() }
+            .select {
+                val base = if (modelName != null) modelCol eq modelName else modelCol.isNotNull()
+                if (wikiOnly) base and (sourceCol like "%fetch_bio%") else base
+            }
             .orderBy(updatedCol, SortOrder.DESC_NULLS_LAST)
     }
 
@@ -418,20 +441,21 @@ private fun loadEmbeddingAstroRowsForDim(
 private fun loadEmbeddingInterpretationRowsForDim(
     dim: Int,
     limit: Int? = null,
-    qidOnly: Boolean = false
+    qidOnly: Boolean = false,
+    wikiOnly: Boolean = false
 ): List<ClusterRow> {
-    val (personCol, modelCol, vectorCol, updatedCol, tableName) = when (dim) {
+    val (personCol, modelCol, vectorCol, updatedCol, sourceCol, tableName) = when (dim) {
         1024 -> EmbeddingColumns(
-            Embeddings1024.personId, Embeddings1024.modelName, Embeddings1024.vector, Embeddings1024.updatedAt, Embeddings1024.tableName
+            Embeddings1024.personId, Embeddings1024.modelName, Embeddings1024.vector, Embeddings1024.updatedAt, Embeddings1024.sourceCol, Embeddings1024.tableName
         )
         768 -> EmbeddingColumns(
-            Embeddings768.personId, Embeddings768.modelName, Embeddings768.vector, Embeddings768.updatedAt, Embeddings768.tableName
+            Embeddings768.personId, Embeddings768.modelName, Embeddings768.vector, Embeddings768.updatedAt, Embeddings768.sourceCol, Embeddings768.tableName
         )
         384 -> EmbeddingColumns(
-            Embeddings384.personId, Embeddings384.modelName, Embeddings384.vector, Embeddings384.updatedAt, Embeddings384.tableName
+            Embeddings384.personId, Embeddings384.modelName, Embeddings384.vector, Embeddings384.updatedAt, Embeddings384.sourceCol, Embeddings384.tableName
         )
         1536 -> EmbeddingColumns(
-            Embeddings1536.personId, Embeddings1536.modelName, Embeddings1536.vector, Embeddings1536.updatedAt, Embeddings1536.tableName
+            Embeddings1536.personId, Embeddings1536.modelName, Embeddings1536.vector, Embeddings1536.updatedAt, Embeddings1536.sourceCol, Embeddings1536.tableName
         )
         else -> return emptyList()
     }
@@ -449,7 +473,9 @@ private fun loadEmbeddingInterpretationRowsForDim(
     }
     val query = baseJoin
         .slice(personCol, modelCol, vectorCol, updatedCol, AstroInterpretations.modelName)
-        .select { modelCol.isNotNull() }
+        .select {
+            if (wikiOnly) (modelCol.isNotNull()) and (sourceCol like "%fetch_bio%") else modelCol.isNotNull()
+        }
         .orderBy(updatedCol, SortOrder.DESC_NULLS_LAST)
 
     if (limit != null) {
@@ -480,6 +506,7 @@ private data class EmbeddingColumns(
     val modelName: org.jetbrains.exposed.sql.Column<String>,
     val vector: org.jetbrains.exposed.sql.Column<String>,
     val updatedAt: org.jetbrains.exposed.sql.Column<*>,
+    val sourceCol: org.jetbrains.exposed.sql.Column<String?>,
     val tableName: String
 )
 
