@@ -277,6 +277,20 @@ class QidResolver {
         }
     }
 
+    /**
+     * Records a person whose first QID resolution attempt failed. Resolver excludes these
+     * from future retries; a future LLM post-processing job will handle them.
+     */
+    private fun markFailedQidLookup(personId: java.util.UUID, reason: String, detailsJson: String?) {
+        transaction(DatabaseManager.getDatabase()) {
+            FailedQidLookup.insertIgnore {
+                it[FailedQidLookup.id] = personId
+                it[FailedQidLookup.failureReason] = reason
+                it[FailedQidLookup.detailsJson] = detailsJson
+            }
+        }
+    }
+
     
     suspend fun resolveQids(limit: Int = 500) {
         data class PendingPerson(
@@ -289,8 +303,9 @@ class QidResolver {
             PersonRaw
                 .innerJoin(Birth, { PersonRaw.id }, { Birth.id })
                 .leftJoin(EntityLink, { PersonRaw.id }, { EntityLink.id })
+                .leftJoin(FailedQidLookup, { PersonRaw.id }, { FailedQidLookup.id })
                 .slice(PersonRaw.id, PersonRaw.name, Birth.date)
-                .select { EntityLink.id.isNull() }
+                .select { EntityLink.id.isNull() and FailedQidLookup.id.isNull() }
                 .orderBy(PersonRaw.createdAt to SortOrder.ASC, PersonRaw.name to SortOrder.ASC)
                 .limit(limit * 10)
                 .map { row ->
@@ -313,30 +328,47 @@ class QidResolver {
         val resolved = mutableListOf<ResolvedQid>()
 
         for (person in pending) {
-            var candidates: List<WikidataItem> = emptyList()
-            for (query in searchNameVariants(person.fullName)) {
-                candidates = searchQid(query)
-                if (candidates.isNotEmpty()) break
-            }
-            var qid: String? = null
-
-            // Only accept when Wikidata entity has matching birth date (P569).
-            // No fallback to first candidate: prevents linking events/non-persons.
-            for (candidate in candidates.take(10)) {
-                if (dobMatches(candidate.id, person.dobIso)) {
-                    qid = candidate.id
-                    break
+            try {
+                var candidates: List<WikidataItem> = emptyList()
+                for (query in searchNameVariants(person.fullName)) {
+                    candidates = searchQid(query)
+                    if (candidates.isNotEmpty()) break
                 }
-            }
 
-            if (qid != null) {
-                resolved.add(
-                    ResolvedQid(
-                        personId = person.personId,
-                        qid = qid,
-                        candidates = candidates.take(10)
+                if (candidates.isEmpty()) {
+                    markFailedQidLookup(person.personId, "no_candidates", null)
+                    continue
+                }
+
+                var qid: String? = null
+                // Only accept when Wikidata entity has matching birth date (P569).
+                // No fallback to first candidate: prevents linking events/non-persons.
+                for (candidate in candidates.take(10)) {
+                    if (dobMatches(candidate.id, person.dobIso)) {
+                        qid = candidate.id
+                        break
+                    }
+                }
+
+                if (qid != null) {
+                    resolved.add(
+                        ResolvedQid(
+                            personId = person.personId,
+                            qid = qid,
+                            candidates = candidates.take(10)
+                        )
                     )
-                )
+                } else {
+                    val details = Json.encodeToString(mapOf("candidates" to candidates.take(10)))
+                    markFailedQidLookup(person.personId, "no_dob_match", details)
+                }
+            } catch (e: Exception) {
+                val details = Json.encodeToString(mapOf("error" to (e.message ?: "unknown")))
+                markFailedQidLookup(person.personId, "api_error", details)
+                if (System.getenv("RESOLVER_DEBUG") == "1") {
+                    println("  [resolveQids] person=${person.personId} EXCEPTION: ${e.message}")
+                    e.printStackTrace()
+                }
             }
         }
 

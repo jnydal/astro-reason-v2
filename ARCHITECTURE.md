@@ -163,11 +163,13 @@ Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia).
 - Trigger fetch-bio service via HTTP
 
 **Workflow**:
-1. Query people without QIDs (no `entity_link` row)
+1. Query people without QIDs (no `entity_link` row) and not in `failed_qid_lookup`
 2. Search Wikidata API
 3. Match by date of birth (P569); no fallback without DOB match
-4. Store QID in `entity_link` and `bio_text`
+4. Store QID in `entity_link` and `bio_text`, or on first failure record in `failed_qid_lookup` (reason: `api_error`, `no_candidates`, `no_dob_match`)
 5. Call fetch-bio API (gated: only when no ingest job is QUEUED or STARTED)
+
+**Failed QID lookup**: Persons whose first resolution attempt fails (API error, no candidates, or no DOB match) are recorded in `failed_qid_lookup` and excluded from resolver retries. A future LLM post-processing job will handle these.
 
 **Fetch-bio gating**: Resolver skips the fetch-bio HTTP call when (1) any ingest job (`worker.ingest.parse_adb_xml`) is QUEUED or STARTED, or (2) `embeddings-worker` consumer lag on the `embeddings` topic exceeds `EMBEDDINGS_LAG_THRESHOLD` (default 100). This serializes embeddings production: ingest produces first, embeddings worker drains, then fetch-bio adds more. QID resolution (steps 1–4) continues every cycle regardless.
 
@@ -272,6 +274,7 @@ Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia).
 - `person_raw` - Identity and XML reference
 - `birth` - Date, time, location data
 - `entity_link` - Wikidata QID per person (populated by Resolver)
+- `failed_qid_lookup` - Persons whose first QID resolution failed; excluded from resolver retries; future LLM job will handle
 - `bio_text` - Biography text and metadata
 - `embeddings_*` - Semantic text embeddings (pgvector)
 - `astro_features` - Numeric astrological features

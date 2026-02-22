@@ -119,6 +119,16 @@ object EntityLink : UUIDTable("entity_link", columnName = "person_id") {
     }
 }
 
+object FailedQidLookup : UUIDTable("failed_qid_lookup", columnName = "person_id") {
+    val failureReason = text("failure_reason")
+    val detailsJson = jsonb("details_json").nullable()
+    val attemptedAt = timestamp("attempted_at").defaultExpression(CurrentTimestamp())
+    
+    init {
+        id.references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
+    }
+}
+
 object BioText : Table("bio_text") {
     val personId = uuid("person_id").references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)
     val qid = text("qid").nullable()

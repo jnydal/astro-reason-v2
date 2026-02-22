@@ -200,6 +200,7 @@ docker compose up -d api stats-worker
 
 The Grafana "Pipeline Observability" dashboard (see README) shows:
 - **Pending QID Resolution** — people with birth data but no Wikidata QID (resolver backlog)
+- **Pending QID Failed** — people whose first QID resolution failed; awaiting LLM post-processing (see "Failed QID Lookup" below)
 - **Pending Wiki Enrichment** — people with QIDs but not yet fetched from Wikipedia (fetch-bio backlog)
 - **Job Status** — Jobs Queued, In Progress, Failed (7d); Recent Jobs table; Errors by Service (daily timeseries); Recent Errors table
 
@@ -250,6 +251,29 @@ docker compose exec kafka rpk topic describe embeddings
 docker compose exec kafka rpk topic describe astro
 docker compose exec kafka rpk topic describe stats
 ```
+
+### Failed QID Lookup
+
+The resolver records persons whose first QID resolution attempt fails (API error, no candidates, or no DOB match) in `failed_qid_lookup`. These are excluded from resolver retries; a future LLM post-processing job will handle them.
+
+**Migration**: For existing databases, run `infra/sql/012_failed_qid_lookup.sql` manually. Fresh installs apply it automatically via `docker-entrypoint-initdb.d`.
+
+**Inspect failed lookups**:
+
+```sql
+-- Count by failure reason
+SELECT failure_reason, COUNT(*) FROM failed_qid_lookup GROUP BY failure_reason;
+
+-- Sample rows with person context
+SELECT f.person_id, pr.name, b.date, f.failure_reason, f.details_json, f.attempted_at
+FROM failed_qid_lookup f
+JOIN person_raw pr ON pr.id = f.person_id
+LEFT JOIN birth b ON b.person_id = f.person_id
+ORDER BY f.attempted_at DESC
+LIMIT 20;
+```
+
+For `no_dob_match`, `details_json` contains `candidates` (Wikidata search results) for LLM context. The future LLM job will query this table, join `person_raw` and `birth`, and use LLM to suggest QIDs or alternate search strategies.
 
 ## Troubleshooting
 
