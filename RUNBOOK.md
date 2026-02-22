@@ -199,6 +199,7 @@ docker compose up -d api stats-worker
 ### Pipeline Observability Dashboard
 
 The Grafana "Pipeline Observability" dashboard (see README) shows:
+- **Embeddings (Wiki Bio)** — count of embeddings based on Wikipedia bio text (`source` contains `fetch_bio`). Requires `infra/sql/013_pipeline_counts_wiki_embeddings.sql` for existing DBs.
 - **Pending QID Resolution** — people with birth data but no Wikidata QID (resolver backlog)
 - **Pending QID Failed** — people whose first QID resolution failed; awaiting LLM post-processing (see "Failed QID Lookup" below)
 - **Pending Wiki Enrichment** — people with QIDs but not yet fetched from Wikipedia (fetch-bio backlog)
