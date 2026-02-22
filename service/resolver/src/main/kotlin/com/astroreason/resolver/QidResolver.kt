@@ -19,6 +19,9 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -160,25 +163,33 @@ class QidResolver {
     
     suspend fun dobMatches(qid: String, dobIso: String?): Boolean {
         if (dobIso.isNullOrBlank()) return false
-        
+
         return try {
             waitForRateLimit()
-            val response = client.get("https://www.wikidata.org/wiki/Special:EntityData/$qid.json") {
+            val bodyText = client.get("https://www.wikidata.org/wiki/Special:EntityData/$qid.json") {
                 timeout {
                     requestTimeoutMillis = 20000
                 }
-            }.body<WikidataEntityData>()
-            
-            val entity = response.entities[qid] ?: return false
-            val birthDateClaim = entity.claims["P569"]?.firstOrNull() ?: return false
-            val timeElement = birthDateClaim.mainsnak?.datavalue?.value?.get("time") ?: return false
-            val timeValue = timeElement.jsonPrimitive.content
-            
+            }.bodyAsText()
+
+            // Parse raw JSON to avoid deserialization failures on claims with string/number
+            // datavalue.value (e.g. P373, P214). We only need P569 (birth date) which has object value.
+            val root = Json { ignoreUnknownKeys = true; isLenient = true }.parseToJsonElement(bodyText).jsonObject
+            val entity = root["entities"]?.jsonObject?.get(qid)?.jsonObject ?: return false
+            val p569Array = entity["claims"]?.jsonObject?.get("P569")?.jsonArray ?: return false
+            val firstClaim = p569Array.firstOrNull()?.jsonObject ?: return false
+            val timeValue = firstClaim["mainsnak"]?.jsonObject?.get("datavalue")?.jsonObject
+                ?.get("value")?.jsonObject?.get("time")?.jsonPrimitive?.content ?: return false
             dobIso == extractWikidataDate(timeValue)
         } catch (e: Exception) {
+            if (System.getenv("RESOLVER_DEBUG") == "1") {
+                println("⚠️ dobMatches failed for $qid dob=$dobIso: ${e.message}")
+                e.printStackTrace()
+            }
             false
         }
     }
+
     
     suspend fun resolveQids(limit: Int = 500) {
         data class PendingPerson(
@@ -272,7 +283,11 @@ class QidResolver {
             }
         }
 
-        println("✅ Resolved ${resolved.size} QIDs")
+        if (resolved.isEmpty() && pending.isNotEmpty()) {
+            println("⚠️ Resolved 0 QIDs (${pending.size} pending). Set RESOLVER_DEBUG=1 and check logs for dobMatches failures.")
+        } else {
+            println("✅ Resolved ${resolved.size} QIDs")
+        }
     }
     
     /**

@@ -103,6 +103,8 @@ services:
       WIKIDATA_JITTER_SEC: ${WIKIDATA_JITTER_SEC:-0.1}
       # Skip fetch-bio when embeddings-worker lag exceeds this (messages). 0 = disabled.
       EMBEDDINGS_LAG_THRESHOLD: ${EMBEDDINGS_LAG_THRESHOLD:-100}
+      # Set to 1 to log dobMatches failures when Resolved 0 QIDs (diagnosis)
+      RESOLVER_DEBUG: ${RESOLVER_DEBUG:-0}
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
       KAFKA_EMBEDDINGS_TOPIC: ${KAFKA_EMBEDDINGS_TOPIC:-embeddings}
       KAFKA_EMBEDDINGS_GROUP_ID: ${KAFKA_EMBEDDINGS_GROUP_ID:-embeddings-worker}

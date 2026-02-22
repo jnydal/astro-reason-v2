@@ -484,9 +484,11 @@ If **pending QID resolution** and **pending wiki enrichment** stay flat for hour
    ```bash
    docker compose logs resolver --tail=50 | grep -E "Resolved|Skipping|Fetched"
    ```
-   - If you see `Resolved 0 QIDs` every cycle, QID resolution is failing. A past bug: Wikidata P569 (birth date) values include numbers; `Map<String, String>` deserialization failed silently. The fix uses `JsonObject` to parse the mixed-type value. Ensure latest Resolver: `docker compose build resolver && docker compose up -d resolver`.
+   - If you see `Resolved 0 QIDs` every cycle, QID resolution is failing. A past bug: Wikidata entity JSON has claims with mixed datavalue types (e.g. P373 string, P214 string); full deserialization failed when it hit a non-object value. The fix parses raw JSON and extracts only P569 (birth date). Ensure latest Resolver: `docker compose build resolver && docker compose up -d resolver`.
 
 2. **Wiki enrichment gating**: Resolver skips fetch-bio when (1) any ingest job is QUEUED/STARTED, or (2) embeddings lag > 100. Check ingest: `SELECT status FROM job_status WHERE function = 'worker.ingest.parse_adb_xml' AND status IN ('QUEUED','STARTED');` (should be empty). Check lag: `docker compose exec kafka rpk group describe embeddings-worker` (LAG should be 0).
+
+3. **QID resolution debugging**: When `Resolved 0 QIDs` every cycle, add `RESOLVER_DEBUG=1` to resolver env and restart. Logs will show the first `dobMatches` failure (Wikidata P569 parse error, network, etc.). Run `./scripts/diagnose-pipeline-stagnation.ps1 -UseDocker` for full diagnostics.
 
 **Lag 0 but embeddings count still low** (jobs consumed but total embeddings far below expected):
 

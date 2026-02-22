@@ -135,12 +135,13 @@ def run(dsn, lang="en", limit=500):
             pr.id AS person_id,
             COALESCE(el.qid, bt.qid) AS qid,
             bt.text AS text,
-            bt.source AS source
+            bt.source AS source,
+            bt.text_hash AS existing_text_hash
         FROM person_raw pr
         LEFT JOIN entity_link el
           ON el.person_id = pr.id
         LEFT JOIN LATERAL (
-            SELECT qid, text, source
+            SELECT qid, text, source, text_hash
             FROM bio_text
             WHERE person_id = pr.id
             ORDER BY retrieved_at DESC NULLS LAST
@@ -254,7 +255,11 @@ def run(dsn, lang="en", limit=500):
             )
 
         wrote += 1
-        enriched_ids.append(person_id)
+        # Only enqueue for embeddings when text actually changed; avoids redundant
+        # jobs where embeddings worker would noop (already_embedded).
+        existing_hash = (r.get("existing_text_hash") or "").strip()
+        if text_hash != existing_hash:
+            enriched_ids.append(person_id)
 
     conn.commit()
 
