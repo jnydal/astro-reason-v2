@@ -201,6 +201,7 @@ docker compose up -d api stats-worker
 The Grafana "Pipeline Observability" dashboard (see README) shows:
 - **Pending QID Resolution** — people with birth data but no Wikidata QID (resolver backlog)
 - **Pending Wiki Enrichment** — people with QIDs but not yet fetched from Wikipedia (fetch-bio backlog)
+- **Job Status** — Jobs Queued, In Progress, Failed (7d); Recent Jobs table; Errors by Service (daily timeseries); Recent Errors table
 
 **Core pipeline diagnostic** (QID resolution, wiki enrichment, re-embedded wiki-based progress):
 
@@ -494,7 +495,7 @@ If **pending QID resolution** and **pending wiki enrichment** stay flat for hour
 
 2. **Wiki enrichment gating**: Resolver skips fetch-bio when (1) any ingest job is QUEUED/STARTED, or (2) embeddings lag > 100. Check ingest: `SELECT status FROM job_status WHERE function = 'worker.ingest.parse_adb_xml' AND status IN ('QUEUED','STARTED');` (should be empty). Check lag: `docker compose exec kafka rpk group describe embeddings-worker` (LAG should be 0).
 
-3. **QID resolution debugging**: When `Resolved 0 QIDs` every cycle, add `RESOLVER_DEBUG=1` to resolver env and restart. Logs will show the first `dobMatches` failure (Wikidata P569 parse error, network, etc.). Run `./scripts/diagnose-pipeline-stagnation.ps1 -UseDocker` for full diagnostics.
+3. **QID resolution debugging**: When `Resolved 0 QIDs` every cycle, set `RESOLVER_DEBUG=1` in resolver env and restart. The resolver will run a **diagnostic pass** after each failed cycle: it logs the first pending person (name, dobIso), Wikidata search results, and for each of the first 5 candidates the step-by-step `dobMatches` trace (entity present, P569 present, timeValue raw, extracted date, match result). This captures Wikidata response variations (missing P569, different date formats, etc.). Run `./scripts/diagnose-pipeline-stagnation.ps1 -UseDocker` for full diagnostics.
 
 **Lag 0 but embeddings count still low** (jobs consumed but total embeddings far below expected):
 

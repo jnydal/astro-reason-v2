@@ -161,8 +161,15 @@ class QidResolver {
         return response.search
     }
     
-    suspend fun dobMatches(qid: String, dobIso: String?): Boolean {
-        if (dobIso.isNullOrBlank()) return false
+    /**
+     * Checks if Wikidata entity P569 (birth date) matches our dobIso (yyyy-MM-dd).
+     * When verbose=true, logs each step to help diagnose Wikidata response variations.
+     */
+    private suspend fun dobMatches(qid: String, dobIso: String?, verbose: Boolean = false): Boolean {
+        if (dobIso.isNullOrBlank()) {
+            if (verbose) println("  [dobMatches] qid=$qid: dobIso is null/blank, skip")
+            return false
+        }
 
         return try {
             waitForRateLimit()
@@ -172,18 +179,65 @@ class QidResolver {
                 }
             }.bodyAsText()
 
-            // Parse raw JSON to avoid deserialization failures on claims with string/number
-            // datavalue.value (e.g. P373, P214). We only need P569 (birth date) which has object value.
+            if (verbose) println("  [dobMatches] qid=$qid: fetched entity JSON (${bodyText.length} chars)")
+
             val root = Json { ignoreUnknownKeys = true; isLenient = true }.parseToJsonElement(bodyText).jsonObject
-            val entity = root["entities"]?.jsonObject?.get(qid)?.jsonObject ?: return false
-            val p569Array = entity["claims"]?.jsonObject?.get("P569")?.jsonArray ?: return false
-            val firstClaim = p569Array.firstOrNull()?.jsonObject ?: return false
-            val timeValue = firstClaim["mainsnak"]?.jsonObject?.get("datavalue")?.jsonObject
-                ?.get("value")?.jsonObject?.get("time")?.jsonPrimitive?.content ?: return false
-            dobIso == extractWikidataDate(timeValue)
+            val entities = root["entities"]?.jsonObject
+            if (entities == null) {
+                if (verbose) println("  [dobMatches] qid=$qid: entities block missing")
+                return false
+            }
+            val entity = entities[qid]?.jsonObject
+            if (entity == null) {
+                if (verbose) println("  [dobMatches] qid=$qid: entity not in response (keys: ${entities.keys})")
+                return false
+            }
+            val claims = entity["claims"]?.jsonObject
+            if (claims == null) {
+                if (verbose) println("  [dobMatches] qid=$qid: claims block missing")
+                return false
+            }
+            val p569Array = claims["P569"]?.jsonArray
+            if (p569Array == null || p569Array.isEmpty()) {
+                if (verbose) println("  [dobMatches] qid=$qid: P569 (birth date) missing (claim keys: ${claims.keys})")
+                return false
+            }
+            val firstClaim = p569Array.firstOrNull()?.jsonObject
+            if (firstClaim == null) {
+                if (verbose) println("  [dobMatches] qid=$qid: first P569 claim not an object")
+                return false
+            }
+            val datavalue = firstClaim["mainsnak"]?.jsonObject?.get("datavalue")?.jsonObject
+            if (datavalue == null) {
+                if (verbose) println("  [dobMatches] qid=$qid: P569 mainsnak.datavalue missing")
+                return false
+            }
+            val value = datavalue["value"]
+            if (value == null) {
+                if (verbose) println("  [dobMatches] qid=$qid: P569 datavalue.value missing")
+                return false
+            }
+            // value can be JsonObject (time has {"time":"+1850-09-04T00:00:00Z"}) or primitive
+            val timeValue: String? = when (val v = value) {
+                is kotlinx.serialization.json.JsonObject -> v["time"]?.jsonPrimitive?.content
+                is kotlinx.serialization.json.JsonPrimitive -> v.content
+                else -> v.toString().trim('"')
+            }
+            if (timeValue.isNullOrBlank()) {
+                if (verbose) println("  [dobMatches] qid=$qid: P569 value has no time (value type: ${value::class.simpleName}, keys: ${(value as? kotlinx.serialization.json.JsonObject)?.keys})")
+                return false
+            }
+            val extracted = extractWikidataDate(timeValue)
+            if (extracted == null) {
+                if (verbose) println("  [dobMatches] qid=$qid: could not extract date from timeValue='$timeValue' (regex expects [+-]yyyy-mm-dd)")
+                return false
+            }
+            val matches = dobIso == extracted
+            if (verbose) println("  [dobMatches] qid=$qid: timeValue='$timeValue' -> extracted='$extracted' vs dobIso='$dobIso' -> match=$matches")
+            matches
         } catch (e: Exception) {
-            if (System.getenv("RESOLVER_DEBUG") == "1") {
-                println("⚠️ dobMatches failed for $qid dob=$dobIso: ${e.message}")
+            if (verbose || System.getenv("RESOLVER_DEBUG") == "1") {
+                println("  [dobMatches] qid=$qid dob=$dobIso EXCEPTION: ${e.message}")
                 e.printStackTrace()
             }
             false
@@ -285,9 +339,40 @@ class QidResolver {
 
         if (resolved.isEmpty() && pending.isNotEmpty()) {
             println("⚠️ Resolved 0 QIDs (${pending.size} pending). Set RESOLVER_DEBUG=1 and check logs for dobMatches failures.")
+            if (System.getenv("RESOLVER_DEBUG") == "1") {
+                val first = pending.first()
+                runDiagnosticFirstPerson(first.fullName, first.dobIso)
+            }
         } else {
             println("✅ Resolved ${resolved.size} QIDs")
         }
+    }
+
+    /**
+     * Runs a verbose diagnostic for the first pending person to capture Wikidata response
+     * variations and pinpoint why dobMatches fails. Only runs when RESOLVER_DEBUG=1.
+     */
+    private suspend fun runDiagnosticFirstPerson(fullName: String, dobIso: String?) {
+        val normName = normalizeName(fullName)
+        println("")
+        println("=== RESOLVER DIAGNOSTIC (first pending person) ===")
+        println("  name: '$fullName'")
+        println("  dobIso: '$dobIso'")
+        println("  normalized: '$normName'")
+        var candidates = searchQid(normName)
+        if (candidates.isEmpty()) {
+            candidates = searchQid(fullName)
+            println("  search(normalized) returned 0; search(original) returned ${candidates.size}")
+        } else {
+            println("  search(normalized) returned ${candidates.size} candidates")
+        }
+        println("  candidate QIDs: ${candidates.take(5).map { it.id }.joinToString(", ")}")
+        for ((i, c) in candidates.take(5).withIndex()) {
+            println("  --- candidate ${i + 1}: ${c.id} (${c.label ?: "no label"}) ---")
+            dobMatches(c.id, dobIso, verbose = true)
+        }
+        println("=== END DIAGNOSTIC ===")
+        println("")
     }
     
     /**
