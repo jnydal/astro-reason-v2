@@ -9,7 +9,7 @@ Operational commands, troubleshooting, and step-by-step procedures live in `RUNB
 
 **Upload XML File**:
 ```bash
-curl -X POST http://localhost:8000/ingest/astrodatabank \
+curl -X POST http://localhost:8003/ingest/astrodatabank \
   -F "xml=@testdata/c_sample.xml"
 ```
 
@@ -23,7 +23,7 @@ curl -X POST http://localhost:8000/ingest/astrodatabank \
 
 **Check Job Status**:
 ```bash
-curl http://localhost:8000/jobs/{jobId}
+curl http://localhost:8003/jobs/{jobId}
 ```
 
 **Response**:

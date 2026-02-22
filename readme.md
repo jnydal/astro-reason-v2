@@ -79,6 +79,7 @@ PostgreSQL is the source of truth for people, births, bios, embeddings, astro fe
 
 - `person_raw` — identity & XML reference
 - `birth` — date/time/location data
+- `entity_link` — Wikidata QID per person (Resolver)
 - `bio_text` — enriched biography metadata
 - `embeddings_*` — semantic text embeddings (pgvector)
 - `astro_features` — numeric planetary/house/aspect features

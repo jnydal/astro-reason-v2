@@ -33,7 +33,8 @@ def healthz():
 @app.post("/fetch-bio", response_model=FetchBioResponse)
 def fetch_bio_endpoint(request: FetchBioRequest = FetchBioRequest()):
     """
-    Fetch Wikipedia biographies for people with QIDs but no text.
+    Fetch Wikipedia biographies for people with QIDs (from entity_link or bio_text).
+    Updates or inserts bio_text; enqueues embedding jobs when bio text changes.
     """
     dsn = os.getenv("PG_DSN") or os.getenv("DATABASE_URL")
     if not dsn:

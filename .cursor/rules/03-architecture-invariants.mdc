@@ -33,7 +33,7 @@ alwaysApply: true
 
 ## Core Tables
 
-- `person_raw`, `birth`, `bio_text` — identity and text
+- `person_raw`, `birth`, `entity_link`, `bio_text` — identity, QID, and text
 - `embeddings_384`, `embeddings_768`, etc. — pgvector
 - `astro_features`, `astro_interpretations` — astro outputs
 - `provenance_event` — audit

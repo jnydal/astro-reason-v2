@@ -21,8 +21,8 @@ docker compose logs -f worker-ingest
 ### Verify Services
 
 ```bash
-# API health
-curl http://localhost:8000/healthz
+# API health (host port 8003; container listens on 8000)
+curl http://localhost:8003/healthz
 
 # Fetch-Bio health
 curl http://localhost:8002/healthz
@@ -36,15 +36,15 @@ curl http://localhost:8001/api/tags
 ### Step 1: Ingest Data
 
 ```bash
-# Upload XML file
-curl -X POST http://localhost:8000/ingest/astrodatabank \
+# Upload XML file (API on host port 8003)
+curl -X POST http://localhost:8003/ingest/astrodatabank \
   -F "xml=@your-file.xml"
 
 # Get job ID from response
 JOB_ID="..."
 
 # Monitor job
-watch -n 2 "curl -s http://localhost:8000/jobs/$JOB_ID | jq .status"
+watch -n 2 "curl -s http://localhost:8003/jobs/$JOB_ID | jq .status"
 ```
 
 **What Happens**:
@@ -160,20 +160,20 @@ The stats worker processes correlation jobs:
 **Enqueue**:
 ```bash
 # All embeddings (default); mode: features or interpretations
-curl "http://localhost:8000/stats/correlation"
-curl "http://localhost:8000/stats/correlation?mode=interpretations"
+curl "http://localhost:8003/stats/correlation"
+curl "http://localhost:8003/stats/correlation?mode=interpretations"
 
-# Restrict to wiki-enriched people only (embeddings from persons with QID)
-curl "http://localhost:8000/stats/correlation?embeddingsScope=qid_only"
-curl "http://localhost:8000/stats/correlation?mode=interpretations&embeddingsScope=qid_only"
+# Restrict to persons with QID only (entity_link)
+curl "http://localhost:8003/stats/correlation?embeddingsScope=qid_only"
+curl "http://localhost:8003/stats/correlation?mode=interpretations&embeddingsScope=qid_only"
 
 # Optional: limit, minSamples
-curl "http://localhost:8000/stats/correlation?limit=5000&minSamples=5"
+curl "http://localhost:8003/stats/correlation?limit=5000&minSamples=5"
 ```
 
 **Check status / results**:
 ```bash
-curl http://localhost:8000/stats/correlation/<jobId>
+curl http://localhost:8003/stats/correlation/<jobId>
 ```
 
 The result includes:
@@ -343,10 +343,10 @@ docker compose exec service-name /bin/sh
 ```python
 import requests
 
-# Upload XML
+# Upload XML (API on host port 8003)
 with open("data.xml", "rb") as f:
     response = requests.post(
-        "http://localhost:8000/ingest/astrodatabank",
+        "http://localhost:8003/ingest/astrodatabank",
         files={"xml": f}
     )
     job = response.json()
@@ -354,7 +354,7 @@ with open("data.xml", "rb") as f:
 
 # Check status
 job_id = job['jobId']
-status = requests.get(f"http://localhost:8000/jobs/{job_id}").json()
+status = requests.get(f"http://localhost:8003/jobs/{job_id}").json()
 print(f"Status: {status['status']}")
 ```
 
@@ -369,7 +369,7 @@ import io.ktor.http.*
 val client = HttpClient(CIO)
 
 // Upload XML
-val response = client.post("http://localhost:8000/ingest/astrodatabank") {
+val response = client.post("http://localhost:8003/ingest/astrodatabank") {
     setBody(MultiPartFormDataContent(
         formData {
             append("xml", File("data.xml").readBytes(), Headers.build {
@@ -385,7 +385,7 @@ val response = client.post("http://localhost:8000/ingest/astrodatabank") {
 ### Service Health
 
 All services expose health endpoints:
-- API: `GET http://localhost:8000/healthz`
+- API: `GET http://localhost:8003/healthz` (host port)
 - Fetch-Bio: `GET http://localhost:8002/healthz`
 
 ### Database Health

@@ -46,12 +46,13 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 
 3. Resolver Service (Kotlin)
    ├─→ Resolves Wikidata QIDs
+   ├─→ Stores QID in entity_link and bio_text
    └─→ Calls → Fetch-Bio API (HTTP)
 
 4. Fetch-Bio Service (Python - Containerized)
-   ├─→ Fetches Wikipedia biographies
-   └─→ Updates → PostgreSQL (bio_text.text)
-       └─→ Enqueues → Kafka (embeddings topic)
+   ├─→ Fetches Wikipedia biographies for people with QIDs
+   ├─→ Updates → PostgreSQL (bio_text)
+   └─→ Enqueues → Kafka (embeddings topic) when bio text changes
 
 5. Astro Service (Python)
    ├─→ Reads from Kafka (astro topic, group: astro-worker)
@@ -100,7 +101,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 ### 1. API Service (`service/api`)
 
 **Technology**: Kotlin + Ktor  
-**Port**: 8000  
+**Port**: 8000 (container); mapped to 8003 on host via Docker Compose  
 **Responsibilities**:
 - REST API endpoints
 - File upload handling
@@ -112,7 +113,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 - `GET /version` - Version information
 - `POST /ingest/astrodatabank` - Upload XML file
 - `GET /jobs/{jobId}` - Get job status
-- `GET /stats/correlation` - Enqueue correlation job (default mode: astro features; optional `?mode=interpretations`; optional `?embeddingsScope=all|qid_only` to restrict to wiki-enriched people)
+- `GET /stats/correlation` - Enqueue correlation job (default mode: astro features; optional `?mode=interpretations`; optional `?embeddingsScope=all|qid_only` to restrict to persons with QID in `entity_link`)
 - `GET /stats/correlation/{jobId}` - Fetch correlation result/status. Result includes `featureImportance` (original) and, for features mode, `featureImportanceDetrended` (after birth-year detrending)
 
 **Dependencies**: Database, Kafka, MinIO
@@ -148,7 +149,7 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 
 **Model**: BAAI/bge-large-en-v1.5 (configurable)
 
-Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia). Use the correlation endpoint's `embeddingsScope=qid_only` parameter to restrict correlation analysis to wiki-enriched people only.
+Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia). Use the correlation endpoint's `embeddingsScope=qid_only` parameter to restrict correlation analysis to persons with a QID in `entity_link` (typically wiki-enriched, but includes anyone resolved to Wikidata).
 
 **Dependencies**: Database, Kafka
 
@@ -162,10 +163,10 @@ Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia).
 - Trigger fetch-bio service via HTTP
 
 **Workflow**:
-1. Query people without QIDs
+1. Query people without QIDs (no `entity_link` row)
 2. Search Wikidata API
 3. Match by date of birth (P569); no fallback without DOB match
-4. Store QID in `bio_text`
+4. Store QID in `entity_link` and `bio_text`
 5. Call fetch-bio API (gated: only when no ingest job is QUEUED or STARTED)
 
 **Fetch-bio gating**: Resolver skips the fetch-bio HTTP call when (1) any ingest job (`worker.ingest.parse_adb_xml`) is QUEUED or STARTED, or (2) `embeddings-worker` consumer lag on the `embeddings` topic exceeds `EMBEDDINGS_LAG_THRESHOLD` (default 100). This serializes embeddings production: ingest produces first, embeddings worker drains, then fetch-bio adds more. QID resolution (steps 1–4) continues every cycle regardless.
@@ -179,15 +180,16 @@ Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia).
 **Technology**: Python + FastAPI  
 **Port**: 8002  
 **Responsibilities**:
-- Fetch Wikipedia biographies for people with QIDs
+- Fetch Wikipedia biographies for people with QIDs (from `entity_link` or `bio_text`)
 - Clean and process wikitext
-- Store biography text in database
+- Store biography text in `bio_text`
+- Enqueue embedding jobs to `embeddings` topic when bio text changes (inserts into `job_status`)
 
 **Endpoints**:
 - `GET /healthz` - Health check
 - `POST /fetch-bio` - Trigger biography fetching
 
-**Dependencies**: Database
+**Dependencies**: Database, Kafka
 
 ### 6. Astro Service (`service/astro`)
 
@@ -269,6 +271,7 @@ Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia).
 **Core Tables**:
 - `person_raw` - Identity and XML reference
 - `birth` - Date, time, location data
+- `entity_link` - Wikidata QID per person (populated by Resolver)
 - `bio_text` - Biography text and metadata
 - `embeddings_*` - Semantic text embeddings (pgvector)
 - `astro_features` - Numeric astrological features
