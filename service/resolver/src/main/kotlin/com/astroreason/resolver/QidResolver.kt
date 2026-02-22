@@ -126,6 +126,39 @@ class QidResolver {
         return "$first $last"
     }
 
+    /** Common name prefixes/titles that often cause Wikidata search to return no results. */
+    private val titlePatterns = listOf(
+        "conte ", "count ", "countess ", "dr. ", "dr ", "professor ", "prof. ", "prof ",
+        "sir ", "dame ", "lord ", "lady ", "duke ", "duchess ", "prince ", "princess ",
+        "baron ", "baroness ", "earl ", "marquis ", "marchioness ", "don ", "doña "
+    ).map { it to Regex("\\b${Regex.escape(it)}", RegexOption.IGNORE_CASE) }
+
+    /**
+     * Strips common titles from a name to improve Wikidata search match rate.
+     * E.g. "Conte Luigi Cadorna" -> "Luigi Cadorna".
+     */
+    private fun stripTitles(name: String): String {
+        var result = name.trim()
+        for ((_, pattern) in titlePatterns) {
+            result = pattern.replace(result, " ").replace(Regex("\\s+"), " ").trim()
+        }
+        return result
+    }
+
+    /**
+     * Returns search query variants to try (in order). Wikidata search often fails when
+     * titles like "Conte" are included; stripping them yields better results.
+     */
+    private fun searchNameVariants(fullName: String): List<String> {
+        val normalized = normalizeName(fullName)
+        val stripped = stripTitles(normalized)
+        val variants = mutableListOf<String>()
+        if (normalized.isNotBlank()) variants.add(normalized)
+        if (fullName.isNotBlank()) variants.add(fullName)
+        if (stripped.isNotBlank() && stripped !in variants) variants.add(stripped)
+        return variants.distinct()
+    }
+
     /**
      * Returns false for event names, accidents, disasters, roles, and other entries that
      * won't resolve to a person with matching birth data (P569) and sensible Wikipedia bio.
@@ -280,9 +313,10 @@ class QidResolver {
         val resolved = mutableListOf<ResolvedQid>()
 
         for (person in pending) {
-            var candidates = searchQid(normalizeName(person.fullName))
-            if (candidates.isEmpty()) {
-                candidates = searchQid(person.fullName)
+            var candidates: List<WikidataItem> = emptyList()
+            for (query in searchNameVariants(person.fullName)) {
+                candidates = searchQid(query)
+                if (candidates.isNotEmpty()) break
             }
             var qid: String? = null
 
@@ -353,18 +387,17 @@ class QidResolver {
      * variations and pinpoint why dobMatches fails. Only runs when RESOLVER_DEBUG=1.
      */
     private suspend fun runDiagnosticFirstPerson(fullName: String, dobIso: String?) {
-        val normName = normalizeName(fullName)
+        val variants = searchNameVariants(fullName)
         println("")
         println("=== RESOLVER DIAGNOSTIC (first pending person) ===")
         println("  name: '$fullName'")
         println("  dobIso: '$dobIso'")
-        println("  normalized: '$normName'")
-        var candidates = searchQid(normName)
-        if (candidates.isEmpty()) {
-            candidates = searchQid(fullName)
-            println("  search(normalized) returned 0; search(original) returned ${candidates.size}")
-        } else {
-            println("  search(normalized) returned ${candidates.size} candidates")
+        println("  search variants: $variants")
+        var candidates: List<WikidataItem> = emptyList()
+        for (query in variants) {
+            candidates = searchQid(query)
+            println("  search('$query') -> ${candidates.size} candidates")
+            if (candidates.isNotEmpty()) break
         }
         println("  candidate QIDs: ${candidates.take(5).map { it.id }.joinToString(", ")}")
         for ((i, c) in candidates.take(5).withIndex()) {
@@ -443,6 +476,7 @@ class QidResolver {
     data class FetchBioResponse(
         val status: String,
         val written: Int,
+        val enqueued: Int? = null,
         val message: String
     )
     
@@ -477,7 +511,8 @@ class QidResolver {
             }
             
             if (parsed.status == "ok") {
-                println("✅ Fetched ${parsed.written} Wikipedia bios: ${parsed.message}")
+                val enq = parsed.enqueued ?: 0
+                println("✅ Fetched ${parsed.written} Wikipedia bios" + (if (enq > 0) ", enqueued $enq for embeddings" else " (no embedding jobs: text unchanged)") + ": ${parsed.message}")
                 true
             } else {
                 println("⚠️ fetch_bio API returned status: ${parsed.status}")

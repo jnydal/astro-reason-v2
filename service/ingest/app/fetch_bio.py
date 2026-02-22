@@ -130,6 +130,7 @@ def run(dsn, lang="en", limit=500):
     )
 
     # Use limit only when explicitly set and > 0; otherwise process all eligible people.
+    # Prioritize pending wiki enrichment (no fetch_bio in source) so new bios get embedded.
     base_query = """
         SELECT
             pr.id AS person_id,
@@ -148,6 +149,7 @@ def run(dsn, lang="en", limit=500):
             LIMIT 1
         ) bt ON TRUE
         WHERE COALESCE(el.qid, bt.qid) IS NOT NULL
+        ORDER BY (COALESCE(bt.source, '') LIKE '%fetch_bio%') ASC NULLS FIRST, pr.id ASC
     """
     if limit and int(limit) > 0:
         cur.execute(base_query + " LIMIT %s", (int(limit),))
@@ -312,7 +314,7 @@ def run(dsn, lang="en", limit=500):
     conn.commit()
     cur.close()
     conn.close()
-    return wrote
+    return wrote, len(enriched_ids)
 
 
 if __name__ == "__main__":

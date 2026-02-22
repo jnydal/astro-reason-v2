@@ -495,7 +495,14 @@ If **pending QID resolution** and **pending wiki enrichment** stay flat for hour
 
 2. **Wiki enrichment gating**: Resolver skips fetch-bio when (1) any ingest job is QUEUED/STARTED, or (2) embeddings lag > 100. Check ingest: `SELECT status FROM job_status WHERE function = 'worker.ingest.parse_adb_xml' AND status IN ('QUEUED','STARTED');` (should be empty). Check lag: `docker compose exec kafka rpk group describe embeddings-worker` (LAG should be 0).
 
-3. **QID resolution debugging**: When `Resolved 0 QIDs` every cycle, set `RESOLVER_DEBUG=1` in resolver env and restart. The resolver will run a **diagnostic pass** after each failed cycle: it logs the first pending person (name, dobIso), Wikidata search results, and for each of the first 5 candidates the step-by-step `dobMatches` trace (entity present, P569 present, timeValue raw, extracted date, match result). This captures Wikidata response variations (missing P569, different date formats, etc.). Run `./scripts/diagnose-pipeline-stagnation.ps1 -UseDocker` for full diagnostics.
+3. **QID resolution debugging**: When `Resolved 0 QIDs` every cycle, set `RESOLVER_DEBUG=1` in resolver env and restart. The resolver will run a **diagnostic pass** after each failed cycle. Common causes:
+   - **Wikidata search returns 0** — names with titles (Conte, Dr., etc.) often fail. The resolver now tries a "strip titles" variant (e.g. "Conte Luigi Cadorna" → "Luigi Cadorna"). If still 0, check network/User-Agent/Wikidata API access.
+   - **dobMatches fails** — diagnostic shows step-by-step trace (P569 present, timeValue, extracted date, match result) for first 5 candidates. Run `./scripts/diagnose-pipeline-stagnation.ps1 -UseDocker` for full diagnostics.
+
+**Embeddings worker idle despite "Fetched X Wikipedia bios"** (wrote > 0 but embeddings never invoked):
+
+- Fetch-bio **only enqueues when bio text changed** (`text_hash != existing_hash`). Re-fetches of unchanged Wikipedia content write to `bio_text` but produce 0 embedding jobs. Check resolver/fetch-bio logs: the message now includes `enqueued N for embeddings` or `(no embedding jobs: text unchanged)`.
+- **Query prioritization**: fetch-bio now processes people **without** `fetch_bio` in their bio source first (pending wiki enrichment), so new bios are more likely to enqueue. If you still see wrote > 0 and enqueued = 0, the pool may already be wiki-enriched — run `enqueue_embeddings_backfill` or `run_embeddings_backfill_sync` to catch any gaps.
 
 **Lag 0 but embeddings count still low** (jobs consumed but total embeddings far below expected):
 

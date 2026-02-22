@@ -24,6 +24,7 @@ class FetchBioRequest(BaseModel):
 class FetchBioResponse(BaseModel):
     status: str
     written: int
+    enqueued: int = 0
     message: str
 
 @app.get("/healthz")
@@ -42,13 +43,14 @@ def fetch_bio_endpoint(request: FetchBioRequest = FetchBioRequest()):
     dsn = _normalize_dsn(dsn)
     
     try:
-        # Run fetch_bio and get the count of written records
-        written = run(dsn, request.lang, request.limit)
+        # Run fetch_bio and get written + enqueued counts
+        written, enqueued = run(dsn, request.lang, request.limit)
         
         return FetchBioResponse(
             status="ok",
             written=written,
-            message=f"Fetched {written} biographies"
+            enqueued=enqueued,
+            message=f"Fetched {written} biographies" + (f", enqueued {enqueued} for embeddings" if enqueued else " (no embedding jobs: text unchanged)")
         )
     except Exception as e:
         logger.exception("fetch_bio failed")
