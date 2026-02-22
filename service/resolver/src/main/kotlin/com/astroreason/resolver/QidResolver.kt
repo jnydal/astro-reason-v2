@@ -116,6 +116,20 @@ class QidResolver {
         return match?.value?.removePrefix("+")
     }
 
+    /** Precision codes: 9=year, 10=month, 11=day. When missing, infer from extracted (e.g. -00-00 = year). */
+    private fun dateMatchesWithPrecision(dobIso: String, extracted: String, precision: Int?): Boolean {
+        val effectivePrecision = precision ?: when {
+            extracted.endsWith("-00-00") -> 9   // year only
+            extracted.endsWith("-00") && !extracted.endsWith("-00-00") -> 10  // year-month
+            else -> 11
+        }
+        return when (effectivePrecision) {
+            9 -> dobIso.take(4) == extracted.take(4)
+            10 -> dobIso.take(7) == extracted.take(7)
+            else -> dobIso == extracted
+        }
+    }
+
     private fun normalizeName(name: String): String {
         val cleaned = name.trim()
         val commaIndex = cleaned.indexOf(',')
@@ -230,44 +244,45 @@ class QidResolver {
                 if (verbose) println("  [dobMatches] qid=$qid: claims block missing")
                 return false
             }
+            // Skip non-humans (buildings, plants, organizations, artifacts)
+            val p31Array = claims["P31"]?.jsonArray
+            if (p31Array != null) {
+                val isHuman = p31Array.any { claim ->
+                    val valObj = claim.jsonObject["mainsnak"]?.jsonObject?.get("datavalue")?.jsonObject?.get("value")
+                    when (valObj) {
+                        is kotlinx.serialization.json.JsonObject -> valObj["id"]?.jsonPrimitive?.content == "Q5"
+                        else -> false
+                    }
+                }
+                if (!isHuman) {
+                    if (verbose) println("  [dobMatches] qid=$qid: not human (P31 != Q5), skip")
+                    return false
+                }
+            }
             val p569Array = claims["P569"]?.jsonArray
             if (p569Array == null || p569Array.isEmpty()) {
                 if (verbose) println("  [dobMatches] qid=$qid: P569 (birth date) missing (claim keys: ${claims.keys})")
                 return false
             }
-            val firstClaim = p569Array.firstOrNull()?.jsonObject
-            if (firstClaim == null) {
-                if (verbose) println("  [dobMatches] qid=$qid: first P569 claim not an object")
-                return false
+            // Check ALL P569 claims (entities can have multiple birth dates, e.g. Julian vs Gregorian)
+            for (i in p569Array.indices) {
+                val claimObj = p569Array[i].jsonObject
+                val datavalue = claimObj["mainsnak"]?.jsonObject?.get("datavalue")?.jsonObject ?: continue
+                val value = datavalue["value"] ?: continue
+                val timeValue: String? = when (val v = value) {
+                    is kotlinx.serialization.json.JsonObject -> v["time"]?.jsonPrimitive?.content
+                    is kotlinx.serialization.json.JsonPrimitive -> v.content
+                    else -> v.toString().trim('"')
+                }
+                if (timeValue.isNullOrBlank()) continue
+                val extracted = extractWikidataDate(timeValue) ?: continue
+                val precision = (value as? kotlinx.serialization.json.JsonObject)?.get("precision")?.jsonPrimitive?.content?.toIntOrNull()
+                val matches = dateMatchesWithPrecision(dobIso, extracted, precision)
+                if (verbose) println("  [dobMatches] qid=$qid P569[$i]: timeValue='$timeValue' -> extracted='$extracted' (precision=$precision) vs dobIso='$dobIso' -> match=$matches")
+                if (matches) return true
             }
-            val datavalue = firstClaim["mainsnak"]?.jsonObject?.get("datavalue")?.jsonObject
-            if (datavalue == null) {
-                if (verbose) println("  [dobMatches] qid=$qid: P569 mainsnak.datavalue missing")
-                return false
-            }
-            val value = datavalue["value"]
-            if (value == null) {
-                if (verbose) println("  [dobMatches] qid=$qid: P569 datavalue.value missing")
-                return false
-            }
-            // value can be JsonObject (time has {"time":"+1850-09-04T00:00:00Z"}) or primitive
-            val timeValue: String? = when (val v = value) {
-                is kotlinx.serialization.json.JsonObject -> v["time"]?.jsonPrimitive?.content
-                is kotlinx.serialization.json.JsonPrimitive -> v.content
-                else -> v.toString().trim('"')
-            }
-            if (timeValue.isNullOrBlank()) {
-                if (verbose) println("  [dobMatches] qid=$qid: P569 value has no time (value type: ${value::class.simpleName}, keys: ${(value as? kotlinx.serialization.json.JsonObject)?.keys})")
-                return false
-            }
-            val extracted = extractWikidataDate(timeValue)
-            if (extracted == null) {
-                if (verbose) println("  [dobMatches] qid=$qid: could not extract date from timeValue='$timeValue' (regex expects [+-]yyyy-mm-dd)")
-                return false
-            }
-            val matches = dobIso == extracted
-            if (verbose) println("  [dobMatches] qid=$qid: timeValue='$timeValue' -> extracted='$extracted' vs dobIso='$dobIso' -> match=$matches")
-            matches
+            if (verbose) println("  [dobMatches] qid=$qid: no P569 claim matched dobIso='$dobIso'")
+            false
         } catch (e: Exception) {
             if (verbose || System.getenv("RESOLVER_DEBUG") == "1") {
                 println("  [dobMatches] qid=$qid dob=$dobIso EXCEPTION: ${e.message}")
