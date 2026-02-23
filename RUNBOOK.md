@@ -301,6 +301,25 @@ docker compose exec kafka rpk topic list
 docker compose logs -f worker-ingest
 ```
 
+### Stats-Worker: Consumer Poll Timeout / Rebalance
+
+If you see:
+```text
+consumer poll timeout has expired ... max.poll.interval.ms
+Kafka commit failed (consumer likely rebalanced)
+```
+
+**Cause**: Correlation jobs with large row counts (e.g. 80K+) can run longer than Kafka's `max.poll.interval.ms`. The worker blocks on processing and does not call `poll()`, so the broker kicks it out of the consumer group.
+
+**Fix**: Increase `KAFKA_MAX_POLL_INTERVAL_MS` for stats-worker. Default is 4 hours (14_400_000 ms). For very large datasets, raise it further in `.env`:
+
+```bash
+# 4 hours (default in docker-compose); use 6–8h for 100K+ rows
+KAFKA_MAX_POLL_INTERVAL_MS=21600000
+```
+
+Then restart: `docker compose up -d stats-worker`.
+
 ### Database Connection Issues
 
 ```bash
@@ -578,6 +597,8 @@ Entries whose names match these patterns are not attempted for Wikidata resoluti
 ### Resolution Acceptance
 
 - Only accept a Wikidata match when the entity has **P569 (birth date)** matching our birth date. No fallback to "first candidate" without DOB match.
+- **Place disambiguation**: When multiple candidates match DOB and we have `birth.place_name`, prefer the candidate whose P19 (place of birth) fuzzy-matches our place. Resolution continues regardless—we always pick a candidate when DOB matches; place only affects which one and what we record.
+- **`place_match_confidence`** (in `entity_link`): 1 = place fuzzy match succeeded; 0 = we had `place_name` and checked, but no match; null = not applicable (no `place_name` or only one DOB match).
 
 ## QA Test Catalog
 
@@ -606,6 +627,7 @@ Project-specific test targets and edge cases. See `.cursor/rules/04-qa-checklist
 | Embeddings | Unsupported dimension | Skip with warning (only 384, 768, 1024, 1536) |
 | Embeddings | Backfill gap | People with `bio_text` but no embeddings; use `enqueue_embeddings_backfill` |
 | Resolver | Skip filters | Non-person entries skipped; only DOB-matched resolutions accepted. See RUNBOOK "XML / ADB Data: Domain Rules". |
+| Resolver | Place disambiguation | When 2+ candidates match DOB and `place_name` is set, prefer place-matching candidate; record `place_match_confidence` (1/0/null). |
 
 ### Correlation Mode
 

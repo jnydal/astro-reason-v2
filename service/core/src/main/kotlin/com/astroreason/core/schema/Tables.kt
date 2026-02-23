@@ -113,6 +113,7 @@ object EntityLink : UUIDTable("entity_link", columnName = "person_id") {
     val score = double("score").nullable()
     val candidatesJson = jsonb("candidates_json").nullable()
     val decidedAt = timestamp("decided_at").nullable()
+    val placeMatchConfidence = short("place_match_confidence").nullable()
     
     init {
         id.references(PersonRaw.id, onDelete = ReferenceOption.CASCADE)

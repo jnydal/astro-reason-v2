@@ -208,14 +208,21 @@ class QidResolver {
         return response.search
     }
     
+    /** Result of fetching and checking a candidate entity. */
+    data class CandidateCheckResult(
+        val dobMatch: Boolean,
+        val placeQid: String?
+    )
+
     /**
-     * Checks if Wikidata entity P569 (birth date) matches our dobIso (yyyy-MM-dd).
+     * Fetches entity JSON and checks P31 (human), P569 (birth date), P19 (place of birth).
+     * Returns (dobMatch, placeQid). placeQid is from P19 when present.
      * When verbose=true, logs each step to help diagnose Wikidata response variations.
      */
-    private suspend fun dobMatches(qid: String, dobIso: String?, verbose: Boolean = false): Boolean {
+    private suspend fun fetchCandidateCheck(qid: String, dobIso: String?, verbose: Boolean = false): CandidateCheckResult {
         if (dobIso.isNullOrBlank()) {
-            if (verbose) println("  [dobMatches] qid=$qid: dobIso is null/blank, skip")
-            return false
+            if (verbose) println("  [fetchCandidateCheck] qid=$qid: dobIso is null/blank, skip")
+            return CandidateCheckResult(dobMatch = false, placeQid = null)
         }
 
         return try {
@@ -226,23 +233,23 @@ class QidResolver {
                 }
             }.bodyAsText()
 
-            if (verbose) println("  [dobMatches] qid=$qid: fetched entity JSON (${bodyText.length} chars)")
+            if (verbose) println("  [fetchCandidateCheck] qid=$qid: fetched entity JSON (${bodyText.length} chars)")
 
             val root = Json { ignoreUnknownKeys = true; isLenient = true }.parseToJsonElement(bodyText).jsonObject
             val entities = root["entities"]?.jsonObject
             if (entities == null) {
-                if (verbose) println("  [dobMatches] qid=$qid: entities block missing")
-                return false
+                if (verbose) println("  [fetchCandidateCheck] qid=$qid: entities block missing")
+                return CandidateCheckResult(dobMatch = false, placeQid = null)
             }
             val entity = entities[qid]?.jsonObject
             if (entity == null) {
-                if (verbose) println("  [dobMatches] qid=$qid: entity not in response (keys: ${entities.keys})")
-                return false
+                if (verbose) println("  [fetchCandidateCheck] qid=$qid: entity not in response (keys: ${entities.keys})")
+                return CandidateCheckResult(dobMatch = false, placeQid = null)
             }
             val claims = entity["claims"]?.jsonObject
             if (claims == null) {
-                if (verbose) println("  [dobMatches] qid=$qid: claims block missing")
-                return false
+                if (verbose) println("  [fetchCandidateCheck] qid=$qid: claims block missing")
+                return CandidateCheckResult(dobMatch = false, placeQid = null)
             }
             // Skip non-humans (buildings, plants, organizations, artifacts)
             val p31Array = claims["P31"]?.jsonArray
@@ -255,14 +262,24 @@ class QidResolver {
                     }
                 }
                 if (!isHuman) {
-                    if (verbose) println("  [dobMatches] qid=$qid: not human (P31 != Q5), skip")
-                    return false
+                    if (verbose) println("  [fetchCandidateCheck] qid=$qid: not human (P31 != Q5), skip")
+                    return CandidateCheckResult(dobMatch = false, placeQid = null)
                 }
             }
+            // Extract P19 (place of birth) QID
+            val placeQid = claims["P19"]?.jsonArray
+                ?.firstOrNull()
+                ?.jsonObject?.get("mainsnak")?.jsonObject?.get("datavalue")?.jsonObject
+                ?.get("value")?.let { v ->
+                    when (v) {
+                        is kotlinx.serialization.json.JsonObject -> v["id"]?.jsonPrimitive?.content
+                        else -> null
+                    }
+                }
             val p569Array = claims["P569"]?.jsonArray
             if (p569Array == null || p569Array.isEmpty()) {
-                if (verbose) println("  [dobMatches] qid=$qid: P569 (birth date) missing (claim keys: ${claims.keys})")
-                return false
+                if (verbose) println("  [fetchCandidateCheck] qid=$qid: P569 (birth date) missing (claim keys: ${claims.keys})")
+                return CandidateCheckResult(dobMatch = false, placeQid = placeQid)
             }
             // Check ALL P569 claims (entities can have multiple birth dates, e.g. Julian vs Gregorian)
             for (i in p569Array.indices) {
@@ -278,18 +295,65 @@ class QidResolver {
                 val extracted = extractWikidataDate(timeValue) ?: continue
                 val precision = (value as? kotlinx.serialization.json.JsonObject)?.get("precision")?.jsonPrimitive?.content?.toIntOrNull()
                 val matches = dateMatchesWithPrecision(dobIso, extracted, precision)
-                if (verbose) println("  [dobMatches] qid=$qid P569[$i]: timeValue='$timeValue' -> extracted='$extracted' (precision=$precision) vs dobIso='$dobIso' -> match=$matches")
-                if (matches) return true
+                if (verbose) println("  [fetchCandidateCheck] qid=$qid P569[$i]: timeValue='$timeValue' -> extracted='$extracted' (precision=$precision) vs dobIso='$dobIso' -> match=$matches")
+                if (matches) return CandidateCheckResult(dobMatch = true, placeQid = placeQid)
             }
-            if (verbose) println("  [dobMatches] qid=$qid: no P569 claim matched dobIso='$dobIso'")
-            false
+            if (verbose) println("  [fetchCandidateCheck] qid=$qid: no P569 claim matched dobIso='$dobIso'")
+            CandidateCheckResult(dobMatch = false, placeQid = placeQid)
         } catch (e: Exception) {
             if (verbose || System.getenv("RESOLVER_DEBUG") == "1") {
-                println("  [dobMatches] qid=$qid dob=$dobIso EXCEPTION: ${e.message}")
+                println("  [fetchCandidateCheck] qid=$qid dob=$dobIso EXCEPTION: ${e.message}")
                 e.printStackTrace()
             }
-            false
+            CandidateCheckResult(dobMatch = false, placeQid = null)
         }
+    }
+
+    /** Batch-fetch English labels for place QIDs. Max 50 IDs per Wikidata API. */
+    private suspend fun fetchPlaceLabels(placeQids: List<String>): Map<String, String> {
+        val ids = placeQids.distinct().filter { it.isNotBlank() }.take(50)
+        if (ids.isEmpty()) return emptyMap()
+
+        return try {
+            waitForRateLimit()
+            val idsParam = ids.joinToString("|")
+            val bodyText = client.get("https://www.wikidata.org/w/api.php") {
+                parameter("action", "wbgetentities")
+                parameter("ids", idsParam)
+                parameter("props", "labels")
+                parameter("format", "json")
+                timeout { requestTimeoutMillis = 20000 }
+            }.bodyAsText()
+
+            val root = Json { ignoreUnknownKeys = true; isLenient = true }.parseToJsonElement(bodyText).jsonObject
+            val entities = root["entities"]?.jsonObject ?: return emptyMap()
+            val result = mutableMapOf<String, String>()
+            for (qid in ids) {
+                val labels = entities[qid]?.jsonObject?.get("labels")?.jsonObject
+                val enLabel = labels?.get("en")?.jsonObject?.get("value")?.jsonPrimitive?.content
+                if (enLabel != null) result[qid] = enLabel
+            }
+            result
+        } catch (e: Exception) {
+            if (System.getenv("RESOLVER_DEBUG") == "1") {
+                println("  [fetchPlaceLabels] EXCEPTION: ${e.message}")
+            }
+            emptyMap()
+        }
+    }
+
+    /** Fuzzy place matching: normalize and check equality, contains, or token overlap. */
+    private fun placeNameMatches(ourPlace: String, wikiLabel: String): Boolean {
+        fun normalize(s: String): String =
+            s.lowercase().trim().replace(",", " ").replace(Regex("\\s+"), " ")
+
+        val our = normalize(ourPlace)
+        val wiki = normalize(wikiLabel)
+        if (our.isBlank() || wiki.isBlank()) return false
+        if (our == wiki) return true
+        if (our in wiki || wiki in our) return true
+        val ourTokens = our.split(Regex("\\s+")).filter { it.length >= 3 }
+        return ourTokens.any { it in wiki }
     }
 
     /**
@@ -311,7 +375,8 @@ class QidResolver {
         data class PendingPerson(
             val personId: UUID,
             val fullName: String,
-            val dobIso: String?
+            val dobIso: String?,
+            val placeName: String?
         )
 
         val pending = transaction(DatabaseManager.getDatabase()) {
@@ -319,7 +384,7 @@ class QidResolver {
                 .innerJoin(Birth, { PersonRaw.id }, { Birth.id })
                 .leftJoin(EntityLink, { PersonRaw.id }, { EntityLink.id })
                 .leftJoin(FailedQidLookup, { PersonRaw.id }, { FailedQidLookup.id })
-                .slice(PersonRaw.id, PersonRaw.name, Birth.date)
+                .slice(PersonRaw.id, PersonRaw.name, Birth.date, Birth.placeName)
                 .select { EntityLink.id.isNull() and FailedQidLookup.id.isNull() }
                 .orderBy(PersonRaw.createdAt to SortOrder.ASC, PersonRaw.name to SortOrder.ASC)
                 .limit(limit * 10)
@@ -327,7 +392,8 @@ class QidResolver {
                     PendingPerson(
                         personId = row[PersonRaw.id].value,
                         fullName = row[PersonRaw.name],
-                        dobIso = row[Birth.date]?.format(DateTimeFormatter.ISO_DATE)
+                        dobIso = row[Birth.date]?.format(DateTimeFormatter.ISO_DATE),
+                        placeName = row[Birth.placeName]
                     )
                 }
                 .filter { person -> looksLikePerson(person.fullName) }
@@ -337,7 +403,8 @@ class QidResolver {
         data class ResolvedQid(
             val personId: UUID,
             val qid: String,
-            val candidates: List<WikidataItem>
+            val candidates: List<WikidataItem>,
+            val placeMatchConfidence: Short?
         )
 
         val resolved = mutableListOf<ResolvedQid>()
@@ -355,28 +422,43 @@ class QidResolver {
                     continue
                 }
 
-                var qid: String? = null
-                // Only accept when Wikidata entity has matching birth date (P569).
-                // No fallback to first candidate: prevents linking events/non-persons.
+                val dobMatching = mutableListOf<Pair<WikidataItem, String?>>()
                 for (candidate in candidates.take(10)) {
-                    if (dobMatches(candidate.id, person.dobIso)) {
-                        qid = candidate.id
-                        break
+                    val check = fetchCandidateCheck(candidate.id, person.dobIso)
+                    if (check.dobMatch) {
+                        dobMatching.add(candidate to check.placeQid)
                     }
                 }
 
-                if (qid != null) {
-                    resolved.add(
-                        ResolvedQid(
-                            personId = person.personId,
-                            qid = qid,
-                            candidates = candidates.take(10)
-                        )
-                    )
-                } else {
+                if (dobMatching.isEmpty()) {
                     val details = Json.encodeToString(mapOf("candidates" to candidates.take(10)))
                     markFailedQidLookup(person.personId, "no_dob_match", details)
+                    continue
                 }
+
+                val (chosenCandidate, placeMatchConfidence) = when {
+                    dobMatching.size == 1 -> dobMatching.first() to null
+                    person.placeName.isNullOrBlank() -> dobMatching.first() to null
+                    else -> {
+                        val placeQids = dobMatching.mapNotNull { (_, pq) -> pq }.distinct()
+                        val labels = if (placeQids.isNotEmpty()) fetchPlaceLabels(placeQids) else emptyMap()
+                        val placeMatched = dobMatching.find { (_, placeQid) ->
+                            placeQid != null && labels[placeQid] != null &&
+                                placeNameMatches(person.placeName!!, labels[placeQid]!!)
+                        }
+                        if (placeMatched != null) placeMatched to 1.toShort()
+                        else dobMatching.first() to 0.toShort()
+                    }
+                }
+
+                resolved.add(
+                    ResolvedQid(
+                        personId = person.personId,
+                        qid = chosenCandidate.first.id,
+                        candidates = candidates.take(10),
+                        placeMatchConfidence = placeMatchConfidence
+                    )
+                )
             } catch (e: Exception) {
                 val details = Json.encodeToString(mapOf("error" to (e.message ?: "unknown")))
                 markFailedQidLookup(person.personId, "api_error", details)
@@ -406,6 +488,7 @@ class QidResolver {
                         it[EntityLink.score] = null
                         it[EntityLink.candidatesJson] = candidatesJson
                         it[EntityLink.decidedAt] = Instant.now()
+                        it[EntityLink.placeMatchConfidence] = item.placeMatchConfidence
                     }
                     EntityLink.update({ EntityLink.id eq item.personId }) {
                         it[EntityLink.qid] = item.qid
@@ -413,6 +496,7 @@ class QidResolver {
                         it[EntityLink.score] = null
                         it[EntityLink.candidatesJson] = candidatesJson
                         it[EntityLink.decidedAt] = Instant.now()
+                        it[EntityLink.placeMatchConfidence] = item.placeMatchConfidence
                     }
                 }
             }
@@ -449,7 +533,8 @@ class QidResolver {
         println("  candidate QIDs: ${candidates.take(5).map { it.id }.joinToString(", ")}")
         for ((i, c) in candidates.take(5).withIndex()) {
             println("  --- candidate ${i + 1}: ${c.id} (${c.label ?: "no label"}) ---")
-            dobMatches(c.id, dobIso, verbose = true)
+            val check = fetchCandidateCheck(c.id, dobIso, verbose = true)
+            println("  -> dobMatch=${check.dobMatch}, placeQid=${check.placeQid}")
         }
         println("=== END DIAGNOSTIC ===")
         println("")

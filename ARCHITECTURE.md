@@ -159,14 +159,15 @@ Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia).
 **Mode**: Continuous polling  
 **Responsibilities**:
 - Resolve people to Wikidata QIDs
-- Match by name and date of birth
+- Match by name, date of birth (P569), and birth place (P19) when available
 - Trigger fetch-bio service via HTTP
 
 **Workflow**:
 1. Query people without QIDs (no `entity_link` row) and not in `failed_qid_lookup`
 2. Search Wikidata API
 3. Match by date of birth (P569); no fallback without DOB match
-4. Store QID in `entity_link` and `bio_text`, or on first failure record in `failed_qid_lookup` (reason: `api_error`, `no_candidates`, `no_dob_match`)
+4. When multiple candidates match DOB and we have `birth.place_name`, prefer the candidate whose P19 (place of birth) fuzzy-matches. Resolution continues regardless of place match.
+5. Store QID and `place_match_confidence` (1=place matched, 0=checked but no match, null=not applicable) in `entity_link`; store QID in `bio_text`. On first failure record in `failed_qid_lookup` (reason: `api_error`, `no_candidates`, `no_dob_match`)
 5. Call fetch-bio API (gated: only when no ingest job is QUEUED or STARTED)
 
 **Failed QID lookup**: Persons whose first resolution attempt fails (API error, no candidates, or no DOB match) are recorded in `failed_qid_lookup` and excluded from resolver retries. A future LLM post-processing job will handle these.
@@ -273,7 +274,7 @@ Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia).
 **Core Tables**:
 - `person_raw` - Identity and XML reference
 - `birth` - Date, time, location data
-- `entity_link` - Wikidata QID per person (populated by Resolver)
+- `entity_link` - Wikidata QID per person (populated by Resolver); `place_match_confidence` (1/0/null) records place fuzzy-match result when applicable
 - `failed_qid_lookup` - Persons whose first QID resolution failed; excluded from resolver retries; future LLM job will handle
 - `bio_text` - Biography text and metadata
 - `embeddings_*` - Semantic text embeddings (pgvector)
