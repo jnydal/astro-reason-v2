@@ -140,12 +140,13 @@ Astro-Reason is a microservices-based research pipeline that evaluates correlati
 
 ### 3. Embeddings Worker (`service/worker_embeddings`)
 
-**Technology**: Python + Kafka  
-**Queue**: `embeddings`  
+**Technology**: Python + Kafka
+**Queue**: `embeddings`
 **Responsibilities**:
 - Generate semantic embeddings for biographies
 - Store vectors in pgvector-enabled PostgreSQL
-- Batch processing for efficiency
+- Batch processing for efficiency; on chunk failure, falls back to per-person processing
+- Record failed attempts in `failed_embeddings`; optionally skip retries via `EMBEDDINGS_SKIP_FAILED=true` (default)
 
 **Model**: BAAI/bge-large-en-v1.5 (configurable)
 
@@ -276,6 +277,7 @@ Embeddings are computed for all people with `bio_text` (XML stubs or Wikipedia).
 - `birth` - Date, time, location data
 - `entity_link` - Wikidata QID per person (populated by Resolver); `place_match_confidence` (1/0/null) records place fuzzy-match result when applicable
 - `failed_qid_lookup` - Persons whose first QID resolution failed; excluded from resolver retries; future LLM job will handle
+- `failed_embeddings` - Persons whose embedding attempt failed; excluded from retries when `EMBEDDINGS_SKIP_FAILED=true` (default); worker uses per-person fallback on batch errors
 - `bio_text` - Biography text and metadata
 - `embeddings_*` - Semantic text embeddings (pgvector)
 - `astro_features` - Numeric astrological features

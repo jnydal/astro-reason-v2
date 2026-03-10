@@ -24,6 +24,7 @@ KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 KAFKA_GROUP_ID = os.getenv("KAFKA_GROUP_ID", "embeddings-worker")
 KAFKA_TOPIC = os.getenv("KAFKA_EMBEDDINGS_TOPIC", "embeddings")
 EMBED_CHUNK_SIZE = max(1, int(os.getenv("EMBEDDINGS_CHUNK_SIZE", "32")))
+EMBEDDINGS_SKIP_FAILED = os.getenv("EMBEDDINGS_SKIP_FAILED", "true").lower() in ("true", "1", "yes")
 
 
 def _update_job_status(job_id: str, status: str, result: str | None = None, exc_info: str | None = None) -> None:
@@ -59,6 +60,22 @@ def _update_job_status(job_id: str, status: str, result: str | None = None, exc_
 def _chunked(items, chunk_size: int):
     for i in range(0, len(items), chunk_size):
         yield items[i:i + chunk_size]
+
+
+def _record_failed_embedding(cur, person_id, model_name: str, reason: str, details: str | None = None) -> None:
+    """Insert/upsert into failed_embeddings. Truncate details to avoid huge rows."""
+    details_trunc = (details or "")[:500] if details else None
+    cur.execute(
+        """
+        INSERT INTO failed_embeddings (person_id, model_name, failure_reason, details, attempted_at)
+        VALUES (%s, %s, %s, %s, NOW())
+        ON CONFLICT (person_id, model_name) DO UPDATE
+          SET failure_reason = EXCLUDED.failure_reason,
+              details = EXCLUDED.details,
+              attempted_at = NOW()
+        """,
+        (person_id, model_name, reason, details_trunc),
+    )
 
 
 def _normalize_person_ids(person_ids) -> list:
@@ -126,6 +143,20 @@ def embed_person_bios(payload: dict, heartbeat=None):
 
     # Filter only new or changed bios
     todo = [r for r in rows if not r["existing_hash"] or r["existing_hash"] != r["text_hash"]]
+
+    # Optionally exclude persons already in failed_embeddings (avoid retry loops)
+    if EMBEDDINGS_SKIP_FAILED and todo:
+        cur.execute(
+            """
+            SELECT person_id FROM failed_embeddings
+            WHERE model_name = %s AND person_id IN %s
+            """,
+            (model_name, tuple(r["person_id"] for r in todo)),
+        )
+        failed_ids = {row["person_id"] for row in cur.fetchall()}
+        if failed_ids:
+            todo = [r for r in todo if r["person_id"] not in failed_ids]
+
     skipped = [r for r in rows if r not in todo]
 
     # Diagnostic: log when we get far fewer rows than person_ids (possible query/format issue)
@@ -161,6 +192,67 @@ def embed_person_bios(payload: dict, heartbeat=None):
 
     model = SentenceTransformer(model_name)
     processed = 0
+    failed_count = 0
+    failed_sample: list[str] = []
+
+    def _insert_embedding(pid, vec, row, table_name: str) -> None:
+        cur.execute(
+            sql.SQL("""
+                INSERT INTO {table} (person_id, model_name, dim, vector, text_hash, meta, source, updated_at)
+                VALUES (%s, %s, %s, %s, %s, jsonb_build_object('provider','sentence-transformers'), %s, NOW())
+                ON CONFLICT (person_id, model_name) DO UPDATE
+                  SET dim = EXCLUDED.dim,
+                      vector = EXCLUDED.vector,
+                      text_hash = EXCLUDED.text_hash,
+                      meta = EXCLUDED.meta,
+                      source = EXCLUDED.source,
+                      updated_at = NOW()
+            """).format(table=sql.Identifier(table_name)),
+            (pid, model_name, int(len(vec)), vec, row["text_hash"], source),
+        )
+
+    def _process_one(row) -> bool:
+        """Process one person. Returns True if successful, False if failed (recorded in failed_embeddings)."""
+        nonlocal failed_count, failed_sample
+        pid = row["person_id"]
+        text = (row["text"] or "").strip()
+        if not text:
+            _record_failed_embedding(cur, pid, model_name, "empty_text", "text empty or invalid")
+            failed_count += 1
+            if len(failed_sample) < 5:
+                failed_sample.append(str(pid)[:8])
+            print(f"Skipped person_id={pid} reason=empty_text")
+            return False
+        try:
+            embeddings = model.encode(
+                [text], batch_size=1, show_progress_bar=False, normalize_embeddings=True
+            )
+            vec = np.array(embeddings[0], dtype=np.float32)
+        except Exception as e:
+            _record_failed_embedding(cur, pid, model_name, "encode_error", str(e))
+            failed_count += 1
+            if len(failed_sample) < 5:
+                failed_sample.append(str(pid)[:8])
+            print(f"Skipped person_id={pid} reason=encode_error details={str(e)[:100]}")
+            return False
+        dim = int(len(vec))
+        if dim not in (384, 768, 1024, 1536):
+            _record_failed_embedding(cur, pid, model_name, "unsupported_dim", f"dim={dim}")
+            failed_count += 1
+            if len(failed_sample) < 5:
+                failed_sample.append(str(pid)[:8])
+            print(f"Skipped person_id={pid} reason=unsupported_dim dim={dim}")
+            return False
+        try:
+            _insert_embedding(pid, vec, row, f"embeddings_{dim}")
+        except Exception as e:
+            _record_failed_embedding(cur, pid, model_name, "db_error", str(e))
+            failed_count += 1
+            if len(failed_sample) < 5:
+                failed_sample.append(str(pid)[:8])
+            print(f"Skipped person_id={pid} reason=db_error details={str(e)[:100]}")
+            return False
+        return True
 
     for chunk in _chunked(todo, EMBED_CHUNK_SIZE):
         if heartbeat:
@@ -169,34 +261,46 @@ def embed_person_bios(payload: dict, heartbeat=None):
         texts = [r["text"] for r in chunk]
         pids = [r["person_id"] for r in chunk]
 
-        embeddings = model.encode(
-            texts, batch_size=8, show_progress_bar=False, normalize_embeddings=True
-        )
-        embeddings = np.array(embeddings, dtype=np.float32)
-
-        for pid, vec, row in zip(pids, embeddings, chunk):
-            dim = int(len(vec))
-            if dim not in (384, 768, 1024, 1536):
-                print(f"⚠️ Unsupported embedding dimension {dim} for person_id={pid}. Skipping.")
-                continue
-            table_name = f"embeddings_{dim}"
-            cur.execute(
-                sql.SQL("""
-                    INSERT INTO {table} (person_id, model_name, dim, vector, text_hash, meta, source, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, jsonb_build_object('provider','sentence-transformers'), %s, NOW())
-                    ON CONFLICT (person_id, model_name) DO UPDATE
-                      SET dim = EXCLUDED.dim,
-                          vector = EXCLUDED.vector,
-                          text_hash = EXCLUDED.text_hash,
-                          meta = EXCLUDED.meta,
-                          source = EXCLUDED.source,
-                          updated_at = NOW()
-                """).format(table=sql.Identifier(table_name)),
-                (pid, model_name, dim, vec, row["text_hash"], source),
+        try:
+            embeddings = model.encode(
+                texts, batch_size=8, show_progress_bar=False, normalize_embeddings=True
             )
+            embeddings = np.array(embeddings, dtype=np.float32)
 
-        conn.commit()
-        processed += len(chunk)
+            for pid, vec, row in zip(pids, embeddings, chunk):
+                dim = int(len(vec))
+                if dim not in (384, 768, 1024, 1536):
+                    _record_failed_embedding(cur, pid, model_name, "unsupported_dim", f"dim={dim}")
+                    failed_count += 1
+                    if len(failed_sample) < 5:
+                        failed_sample.append(str(pid)[:8])
+                    print(f"Skipped person_id={pid} reason=unsupported_dim dim={dim}")
+                    continue
+                table_name = f"embeddings_{dim}"
+                cur.execute(
+                    sql.SQL("""
+                        INSERT INTO {table} (person_id, model_name, dim, vector, text_hash, meta, source, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, jsonb_build_object('provider','sentence-transformers'), %s, NOW())
+                        ON CONFLICT (person_id, model_name) DO UPDATE
+                          SET dim = EXCLUDED.dim,
+                              vector = EXCLUDED.vector,
+                              text_hash = EXCLUDED.text_hash,
+                              meta = EXCLUDED.meta,
+                              source = EXCLUDED.source,
+                              updated_at = NOW()
+                    """).format(table=sql.Identifier(table_name)),
+                    (pid, model_name, dim, vec, row["text_hash"], source),
+                )
+                processed += 1
+            conn.commit()
+        except Exception as batch_err:
+            print(f"Falling back to per-person processing for chunk ({len(chunk)} persons) after batch error: {batch_err}")
+            for row in chunk:
+                if heartbeat:
+                    heartbeat()
+                if _process_one(row):
+                    processed += 1
+            conn.commit()
 
     # Provenance logging
     log_event(
@@ -209,13 +313,24 @@ def embed_person_bios(payload: dict, heartbeat=None):
             "model": model_name,
             "source": source,
             "timestamp": datetime.utcnow().isoformat(),
+            "failed_count": failed_count,
+            "failed_sample": failed_sample[:5],
         },
     )
     conn.commit()
-    cur.close(); conn.close()
+    cur.close()
+    conn.close()
 
-    print(f"✅ Embedded {processed} bios.")
-    return {"status": "ok", "count": processed}
+    msg = f"Embedded {processed} bios."
+    if failed_count:
+        msg += f" Skipped {failed_count} (recorded in failed_embeddings, sample: {failed_sample})"
+    print(f"✅ {msg}")
+    return {
+        "status": "ok",
+        "count": processed,
+        "failed_count": failed_count,
+        "failed_sample": failed_sample[:5],
+    }
 
 
 def _consume_loop():

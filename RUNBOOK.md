@@ -276,6 +276,33 @@ LIMIT 20;
 
 For `no_dob_match`, `details_json` contains `candidates` (Wikidata search results) for LLM context. The future LLM job will query this table, join `person_raw` and `birth`, and use LLM to suggest QIDs or alternate search strategies.
 
+### Failed Embeddings
+
+The embeddings worker records persons whose embedding attempt failed (encode error, DB error, unsupported dimension, empty text) in `failed_embeddings`. These are optionally excluded from retries via `EMBEDDINGS_SKIP_FAILED=true` (default). The worker uses chunk-then-fallback: on batch failure, it processes each person individually and records failures without blocking the pipeline.
+
+**Migration**: For existing databases, run `infra/sql/015_failed_embeddings.sql` manually. Fresh installs apply it automatically via `docker-entrypoint-initdb.d`.
+
+**Inspect failed embeddings**:
+
+```sql
+-- Count by failure reason
+SELECT failure_reason, COUNT(*) FROM failed_embeddings GROUP BY failure_reason;
+
+-- Sample rows
+SELECT fe.person_id, pr.name, fe.model_name, fe.failure_reason, fe.details, fe.attempted_at
+FROM failed_embeddings fe
+JOIN person_raw pr ON pr.id = fe.person_id
+ORDER BY fe.attempted_at DESC
+LIMIT 20;
+```
+
+**Retry after fix** (e.g. after fixing a bad bio text or DB constraint): delete the failed row so the next job will retry:
+```sql
+DELETE FROM failed_embeddings WHERE person_id = '<uuid>' AND model_name = 'BAAI/bge-large-en-v1.5';
+-- Or clear all for a full retry:
+-- DELETE FROM failed_embeddings;
+```
+
 ## Troubleshooting
 
 ### Service Won't Start
