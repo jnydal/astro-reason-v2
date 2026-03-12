@@ -36,6 +36,36 @@ class RateLimiter:
         self._next_time = time.monotonic() + self._min_interval
 
 
+def _get_with_retry(
+    session: requests.Session,
+    url: str,
+    max_retries: int = 3,
+) -> requests.Response:
+    """GET with bounded retries on 429 (rate limit). Respects Retry-After header."""
+    last_exc = None
+    for attempt in range(max_retries):
+        r = session.get(url, timeout=20)
+        if r.status_code != 429:
+            r.raise_for_status()
+            return r
+        last_exc = requests.exceptions.HTTPError(
+            f"429 Too Many Requests: {r.text[:200]}", response=r
+        )
+        # Respect Retry-After if present; else exponential backoff (60s, 120s, 240s)
+        retry_sec = 60
+        retry_after = r.headers.get("Retry-After")
+        if retry_after:
+            try:
+                retry_sec = int(retry_after)
+            except ValueError:
+                pass
+        else:
+            retry_sec = 60 * (2**attempt)
+        if attempt < max_retries - 1:
+            time.sleep(retry_sec)
+    raise last_exc  # type: ignore[misc]
+
+
 def _wiki_session() -> requests.Session:
     user_agent = os.getenv(
         "WIKI_USER_AGENT",
@@ -48,11 +78,9 @@ def _wiki_session() -> requests.Session:
 
 def sitelink(session: requests.Session, limiter: RateLimiter, qid, lang="en"):
     limiter.wait()
-    r = session.get(
-        f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json",
-        timeout=20,
+    r = _get_with_retry(
+        session, f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
     )
-    r.raise_for_status()
     j = r.json()
     ent = j["entities"][qid]
     key = f"{lang}wiki"
@@ -60,11 +88,9 @@ def sitelink(session: requests.Session, limiter: RateLimiter, qid, lang="en"):
 
 def fetch_latest_wikitext(session: requests.Session, limiter: RateLimiter, lang, title):
     limiter.wait()
-    r = session.get(
-        f"https://{lang}.wikipedia.org/w/rest.php/v1/page/{title}",
-        timeout=20,
+    r = _get_with_retry(
+        session, f"https://{lang}.wikipedia.org/w/rest.php/v1/page/{title}"
     )
-    r.raise_for_status()
     j = r.json()
     page_id = j.get("id")
     latest = j.get("latest", {}) or {}

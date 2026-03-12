@@ -129,6 +129,12 @@ services:
       PORT: 8002
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
       KAFKA_EMBEDDINGS_TOPIC: ${KAFKA_EMBEDDINGS_TOPIC:-embeddings}
+      WIKI_USER_AGENT: "${WIKI_USER_AGENT:-astro-reason/0.1 (contact: jnydal@gmail.com)}"
+      # Conservative defaults for Wikidata to avoid 429; increase if still rate-limited
+      WIKIDATA_MIN_INTERVAL_SEC: ${WIKIDATA_MIN_INTERVAL_SEC:-2.0}
+      WIKIDATA_JITTER_SEC: ${WIKIDATA_JITTER_SEC:-0.5}
+      WIKIPEDIA_MIN_INTERVAL_SEC: ${WIKIPEDIA_MIN_INTERVAL_SEC:-1.0}
+      WIKIPEDIA_JITTER_SEC: ${WIKIPEDIA_JITTER_SEC:-0.2}
     ports:
       - "8002:8002"
     depends_on:

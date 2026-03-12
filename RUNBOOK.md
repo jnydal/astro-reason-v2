@@ -78,8 +78,9 @@ docker compose logs -f resolver
 Example `.env`:
 ```bash
 WIKI_USER_AGENT=astro-reason/0.1 (contact: you@example.com)
-WIKIDATA_MIN_INTERVAL_SEC=1.0
-WIKIDATA_JITTER_SEC=0.2
+# fetch-bio default: 2.0s for Wikidata to reduce 429 risk
+WIKIDATA_MIN_INTERVAL_SEC=2.0
+WIKIDATA_JITTER_SEC=0.5
 WIKIPEDIA_MIN_INTERVAL_SEC=1.0
 WIKIPEDIA_JITTER_SEC=0.2
 # Skip fetch-bio when embeddings-worker lag exceeds this (0 = disabled)
@@ -365,6 +366,24 @@ curl http://localhost:8001/api/tags
 # Pull model if needed
 docker compose exec local-llm ollama pull qwen2.5:7b-instruct-q4_K_M
 ```
+
+### Wikidata 429 Rate Limit (Too Many Requests)
+
+If you see `fetch_bio API failed: 500 ... 429 Client Error: Your bot is making too many requests`:
+
+**Cause**: Wikidata rate-limits unauthenticated clients. The resolver and fetch-bio both call Wikidata; combined traffic can exceed limits.
+
+**Mitigations**:
+
+1. **Automatic retries**: fetch-bio retries 429s up to 3 times with exponential backoff (60s, 120s, 240s) and honors `Retry-After` when present.
+
+2. **Slower rate limits**: Increase intervals in `.env`:
+   ```bash
+   WIKIDATA_MIN_INTERVAL_SEC=3.0   # fetch-bio default is 2.0
+   RESOLVE_LIMIT=25                # fewer people per batch
+   ```
+
+3. **For high-volume use**: Contact bot-traffic@wikimedia.org to request higher limits or run on Wikimedia Toolforge.
 
 ## Development Workflow
 
