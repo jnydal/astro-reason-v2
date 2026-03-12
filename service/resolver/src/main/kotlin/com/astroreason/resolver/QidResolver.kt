@@ -615,12 +615,14 @@ class QidResolver {
     suspend fun triggerFetchBio(lang: String = "en", limit: Int = 500): Boolean {
         return try {
             val fetchBioUrl = System.getenv("FETCH_BIO_URL") ?: "http://fetch-bio:8002"
-            
+            val timeoutMs = System.getenv("FETCH_BIO_TIMEOUT_MS")?.toLongOrNull() ?: 900000L // 15 min; ~3s/person at rate limits
+            val effectiveLimit = System.getenv("FETCH_BIO_LIMIT")?.toIntOrNull() ?: limit
+
             val response = client.post("$fetchBioUrl/fetch-bio") {
                 contentType(ContentType.Application.Json)
-                setBody(FetchBioRequest(lang = lang, limit = limit))
+                setBody(FetchBioRequest(lang = lang, limit = effectiveLimit))
                 timeout {
-                    requestTimeoutMillis = 300000 // 5 minutes
+                    requestTimeoutMillis = timeoutMs
                 }
                 expectSuccess = false
             }

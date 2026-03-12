@@ -85,6 +85,11 @@ WIKIPEDIA_MIN_INTERVAL_SEC=1.0
 WIKIPEDIA_JITTER_SEC=0.2
 # Skip fetch-bio when embeddings-worker lag exceeds this (0 = disabled)
 EMBEDDINGS_LAG_THRESHOLD=100
+# Resolver HTTP timeout for fetch-bio API (ms). Default 900000 (15 min) for ~3s/person with rate limits.
+# Increase if batches still time out (e.g. 429 retries); decrease if you use FETCH_BIO_LIMIT for smaller batches.
+FETCH_BIO_TIMEOUT_MS=900000
+# Optional: smaller batch size for fetch-bio than RESOLVE_LIMIT (e.g. 50) to keep each call under timeout
+# FETCH_BIO_LIMIT=50
 ```
 
 Safe schedule suggestion:
@@ -384,6 +389,17 @@ If you see `fetch_bio API failed: 500 ... 429 Client Error: Your bot is making t
    ```
 
 3. **For high-volume use**: Contact bot-traffic@wikimedia.org to request higher limits or run on Wikimedia Toolforge.
+
+### Fetch-bio Request Timeout (HttpRequestTimeoutException)
+
+If you see `HttpRequestTimeoutException: Request timeout has expired [url=.../fetch-bio, request_timeout=300000 ms]`:
+
+**Cause**: The fetch-bio service processes each person with rate limiting (~2s Wikidata + ~1s Wikipedia per person). For 200 people that's ~10+ minutes. The resolver's HTTP client default timeout is now 15 minutes (900000 ms); if you had an older config or hit 429 retries, it can still exceed the limit.
+
+**Mitigations**:
+
+1. **Increase timeout**: Set `FETCH_BIO_TIMEOUT_MS=1200000` (20 min) in `.env` and restart the resolver.
+2. **Use smaller batches**: Set `FETCH_BIO_LIMIT=50` so each fetch-bio call processes fewer people and completes within the timeout.
 
 ## Development Workflow
 
