@@ -581,6 +581,11 @@ class QidResolver {
                 if (topicPartitions.isEmpty()) return@use false
 
                 val committed = admin.listConsumerGroupOffsets(groupId).partitionsToOffsetAndMetadata().get()
+                // When the consumer group has never committed (new group or worker never started),
+                // committed is empty and we would treat lag = endOffset (huge) and block fetch-bio
+                // forever. Avoid that: only block when we have actual committed offsets and lag is high.
+                if (committed.isEmpty()) return@use false
+
                 val endSpecs = topicPartitions.associateWith { OffsetSpec.latest() }
                 val endOffsets = admin.listOffsets(endSpecs).all().get()
 

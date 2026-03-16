@@ -390,6 +390,45 @@ If you see `fetch_bio API failed: 500 ... 429 Client Error: Your bot is making t
 
 3. **For high-volume use**: Contact bot-traffic@wikimedia.org to request higher limits or run on Wikimedia Toolforge.
 
+### Grafana / Dashboard Numbers Not Moving (Pipeline Stuck)
+
+If **Pipeline Observability** counts (pending QID, pending wiki, embeddings wiki, etc.) stay the same for days, the resolver or fetch-bio is almost certainly blocked. Check in this order:
+
+1. **Stuck ingest job (most common)**  
+   Resolver skips fetch-bio whenever any ingest job is QUEUED or STARTED. If a job was enqueued but never processed (e.g. message lost, worker down), it blocks forever.
+
+   ```sql
+   SELECT id, function, status, enqueued_at FROM job_status
+   WHERE function = 'worker.ingest.parse_adb_xml' AND status IN ('QUEUED','STARTED');
+   ```
+
+   If you see rows here, either wait for the ingest worker to process them or mark them failed so the gate opens:
+
+   ```sql
+   UPDATE job_status SET status = 'FAILED', result = 'Manually failed to unblock resolver', ended_at = NOW()
+   WHERE function = 'worker.ingest.parse_adb_xml' AND status IN ('QUEUED','STARTED');
+   ```
+
+2. **Embeddings lag above threshold**  
+   Resolver skips fetch-bio when `embeddings-worker` lag on topic `embeddings` exceeds `EMBEDDINGS_LAG_THRESHOLD` (default 100).
+
+   ```bash
+   docker compose exec kafka rpk group describe embeddings-worker
+   ```
+
+   If LAG is > 100, ensure the **embeddings** service is running and consuming. Once it drains, fetch-bio will run again. If the consumer group had no committed offsets (e.g. new deployment), the resolver used to treat that as infinite lag and block forever; that is now fixed so fetch-bio is allowed when the group has no offsets.
+
+3. **Resolver not resolving (Resolved 0 QIDs)**  
+   If logs show `Resolved 0 QIDs` every cycle but there are pending people, set `RESOLVER_DEBUG=1` and restart the resolver; check the diagnostic output for Wikidata search/DOB match issues. See "Pending QID / Wiki Enrichment Stagnation" in this runbook.
+
+4. **Quick diagnostic**  
+   Run the core pipeline diagnostic and (on Windows) stagnation script:
+
+   ```bash
+   ./scripts/diagnose-core-pipeline.sh -UseDocker
+   ./scripts/diagnose-pipeline-stagnation.ps1 -UseDocker
+   ```
+
 ### Fetch-bio Request Timeout (HttpRequestTimeoutException)
 
 If you see `HttpRequestTimeoutException: Request timeout has expired [url=.../fetch-bio, request_timeout=300000 ms]`:
