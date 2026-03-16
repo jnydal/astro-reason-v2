@@ -413,6 +413,7 @@
         "y": 0
       },
       "id": 9,
+      "description": "Total with birth but no QID. See \"Resolver can try\" vs \"QID Failed once\" for breakdown.",
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -438,7 +439,71 @@
           "refId": "A"
         }
       ],
-      "title": "Pending QID Resolution",
+      "title": "Pending QID (no QID yet)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 21,
+        "y": 0
+      },
+      "id": 19,
+      "description": "People the resolver will attempt (not in failed_qid_lookup; have not been tried yet).",
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT pending_qid_resolver_can_try AS value FROM pipeline_counts;",
+          "refId": "A"
+        }
+      ],
+      "title": "Resolver can try",
       "type": "stat"
     },
     {
@@ -838,7 +903,8 @@
           "refId": "A"
         }
       ],
-      "title": "Pending QID Failed",
+      "description": "First resolution attempt failed (no candidates / no DOB match / API error). Resolver does not retry these.",
+      "title": "QID Failed once (no retry)",
       "type": "stat"
     },
     {

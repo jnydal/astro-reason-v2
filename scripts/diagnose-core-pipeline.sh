@@ -51,26 +51,40 @@ echo ""
 
 # --- 1. QID resolving progress ---
 echo "--- 1. QID resolving ---"
+# pending_no_qid = with birth but no entity_link (dashboard "Pending QID Resolution")
+# resolver_workload = same but NOT in failed_qid_lookup (resolver only tries these; failed are skipped)
 QID_SQL="
 SELECT
   (SELECT COUNT(*) FROM person_raw pr INNER JOIN birth b ON b.person_id = pr.id)::text AS eligible,
   (SELECT COUNT(*) FROM entity_link)::text AS resolved,
-  (SELECT COUNT(*) FROM person_raw pr INNER JOIN birth b ON b.person_id = pr.id LEFT JOIN entity_link el ON el.person_id = pr.id WHERE el.person_id IS NULL)::text AS pending
+  (SELECT COUNT(*) FROM person_raw pr INNER JOIN birth b ON b.person_id = pr.id LEFT JOIN entity_link el ON el.person_id = pr.id WHERE el.person_id IS NULL)::text AS pending_no_qid,
+  (SELECT COUNT(*) FROM person_raw pr INNER JOIN birth b ON b.person_id = pr.id
+   LEFT JOIN entity_link el ON el.person_id = pr.id
+   LEFT JOIN failed_qid_lookup f ON f.person_id = pr.id
+   WHERE el.person_id IS NULL AND f.person_id IS NULL)::text AS resolver_workload,
+  (SELECT COUNT(*) FROM failed_qid_lookup)::text AS failed_once
 "
 qid_row=$(run_sql "$QID_SQL")
 if [ -n "$qid_row" ]; then
-  IFS='|' read -r eligible resolved pending <<< "$qid_row"
+  IFS='|' read -r eligible resolved pending_no_qid resolver_workload failed_once <<< "$qid_row"
   eligible=${eligible:-0}
   resolved=${resolved:-0}
-  pending=${pending:-0}
+  pending_no_qid=${pending_no_qid:-0}
+  resolver_workload=${resolver_workload:-0}
+  failed_once=${failed_once:-0}
   pct="0"
   if [ "$eligible" -gt 0 ] 2>/dev/null; then
     pct=$((resolved * 100 / eligible))
   fi
   printf "  Eligible (with birth):  %s\n" "$eligible"
   printf "  Resolved (have QID):    %s\n" "$resolved"
-  printf "  Pending resolution:     %s\n" "$pending"
+  printf "  Pending (no QID):       %s  (dashboard figure)\n" "$pending_no_qid"
+  printf "    -> Resolver can try:  %s  (excludes failed once)\n" "$resolver_workload"
+  printf "    -> Failed once:       %s  (resolver skips; no retry)\n" "$failed_once"
   printf "  Progress:               %s%%\n" "$pct"
+  if [ "$resolver_workload" -eq 0 ] 2>/dev/null && [ "$pending_no_qid" -gt 0 ] 2>/dev/null; then
+    echo "  => Resolution halted: everyone without QID has already been tried and is in failed_qid_lookup."
+  fi
 else
   echo "  (could not query - is db running?)"
 fi
@@ -100,6 +114,9 @@ if [ -n "$wiki_row" ]; then
   printf "  Wiki enriched:          %s\n" "$wiki_enriched"
   printf "  Pending wiki fetch:     %s\n" "$pending_wiki"
   printf "  Progress:               %s%%\n" "$pct"
+  if [ "$pending_wiki" -gt 0 ] 2>/dev/null; then
+    echo "  (If fetch-bio runs but this stays high: many QIDs have no en.wikipedia sitelink; fetch-bio skips them.)"
+  fi
 else
   echo "  (could not query)"
 fi

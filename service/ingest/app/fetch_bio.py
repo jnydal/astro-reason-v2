@@ -157,6 +157,7 @@ def run(dsn, lang="en", limit=500):
 
     # Use limit only when explicitly set and > 0; otherwise process all eligible people.
     # Prioritize pending wiki enrichment (no fetch_bio in source) so new bios get embedded.
+    # Exclude QIDs already known to have no sitelink (no_wiki_sitelink) to avoid re-checking every cycle.
     base_query = """
         SELECT
             pr.id AS person_id,
@@ -175,12 +176,13 @@ def run(dsn, lang="en", limit=500):
             LIMIT 1
         ) bt ON TRUE
         WHERE COALESCE(el.qid, bt.qid) IS NOT NULL
+          AND COALESCE(el.qid, bt.qid) NOT IN (SELECT qid FROM no_wiki_sitelink WHERE lang = %s)
         ORDER BY (COALESCE(bt.source, '') LIKE '%%fetch_bio%%') ASC NULLS FIRST, pr.id ASC
     """
     if limit and int(limit) > 0:
-        cur.execute(base_query + " LIMIT %s", (int(limit),))
+        cur.execute(base_query + " LIMIT %s", (lang, int(limit)))
     else:
-        cur.execute(base_query)
+        cur.execute(base_query, (lang,))
     rows = cur.fetchall()
 
     wrote = 0
@@ -190,6 +192,14 @@ def run(dsn, lang="en", limit=500):
         person_id = r["person_id"]
         title = sitelink(session, wikidata_limiter, r["qid"], lang)
         if not title:
+            # Record so we skip this QID in future runs (saves rate limit).
+            cur.execute(
+                """
+                INSERT INTO no_wiki_sitelink (qid, lang) VALUES (%s, %s)
+                ON CONFLICT (qid, lang) DO UPDATE SET checked_at = now()
+                """,
+                (r["qid"], lang),
+            )
             continue
 
         page_id, rev, wt = fetch_latest_wikitext(session, wikipedia_limiter, lang, title)

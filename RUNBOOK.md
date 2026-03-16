@@ -206,6 +206,7 @@ docker compose up -d api stats-worker
 
 The Grafana "Pipeline Observability" dashboard (see README) shows:
 - **Embeddings (Wiki Bio)** — count of embeddings based on Wikipedia bio text (`source` contains `fetch_bio`). Requires `infra/sql/013_pipeline_counts_wiki_embeddings.sql` for existing DBs.
+- **Resolver can try** — people the resolver will attempt (no QID, not in `failed_qid_lookup`). Requires `infra/sql/016_pipeline_counts_resolver_can_try.sql` for existing DBs.
 - **Pending QID Resolution** — people with birth data but no Wikidata QID (resolver backlog)
 - **Pending QID Failed** — people whose first QID resolution failed; awaiting LLM post-processing (see "Failed QID Lookup" below)
 - **Pending Wiki Enrichment** — people with QIDs but not yet fetched from Wikipedia (fetch-bio backlog)
@@ -663,6 +664,32 @@ If **pending QID resolution** and **pending wiki enrichment** stay flat for hour
 ```bash
 docker compose run --rm embeddings python -m app.reembed_stale_sync
 ```
+
+### Why Resolution Can Be "Halted" (Resolved 0 QIDs)
+
+The resolver only considers people who: have birth data, **no** `entity_link` row, and **are not** in `failed_qid_lookup`. Anyone whose **first** resolution attempt failed (no candidates, no DOB match, or API error) is recorded in `failed_qid_lookup` and **never retried** by the resolver. So if everyone left without a QID has already been tried once, "Resolver can try" is 0 and resolution appears halted — by design.
+
+**Check:** Run `./scripts/diagnose-core-pipeline.sh -UseDocker` and look at "Resolver can try" vs "Failed once". If Resolver can try = 0 and Pending (no QID) > 0, that's why: everyone without a QID is in `failed_qid_lookup`. A future LLM post-processing job is intended to handle those; until then they stay unresolved.
+
+### Why Resolved QIDs Don't Always Yield Bios
+
+Fetch-bio only writes a bio when the QID has an **en.wikipedia** sitelink in Wikidata and the page returns usable wikitext. Many QIDs have no en.wikipedia page (non-English focus, minor figures, stubs, or redirects). For those, fetch-bio skips the person (no write, no embedding job). So "Pending wiki enrichment" can stay high even when fetch-bio is being called every cycle — the resolver is not stuck; many resolved QIDs simply don't have a usable en.wikipedia bio.
+
+**Check:** Resolver logs show "Fetched N Wikipedia bios" each run. If N is 0 or small while "Pending wiki" is large, most of those QIDs have no en.wikipedia sitelink. The diagnostic script notes this when pending wiki > 0.
+
+### No-Wiki-Sitelink Cache (skip QIDs with no en sitelink)
+
+Fetch-bio records QIDs that have **no** en.wikipedia (or other lang) sitelink in the `no_wiki_sitelink` table and excludes them from future batches. That avoids re-checking the same QIDs every cycle and saves Wikidata rate limit.
+
+**Migration**: For existing databases, run `infra/sql/017_no_wiki_sitelink.sql` manually. Fresh installs apply it via `docker-entrypoint-initdb.d`.
+
+**Re-check later** (e.g. once a year, in case Wikipedia added pages):
+
+```sql
+DELETE FROM no_wiki_sitelink WHERE lang = 'en';
+```
+
+Then the next fetch-bio runs will try those QIDs again.
 
 ## XML / ADB Data: Domain Rules
 
