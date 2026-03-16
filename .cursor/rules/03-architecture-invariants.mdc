@@ -41,8 +41,23 @@ alwaysApply: true
 
 ## Job Status vs Kafka
 
-- **job_status** (PostgreSQL) is the source of truth for job lifecycle. Enqueue = insert row + publish to Kafka. Workers update `job_status` as they process. Status lookups query `job_status` by ID, not Kafka.
+- **job_status** (PostgreSQL) is the source of truth for job lifecycle. Workers update `job_status` as they process. Status lookups query `job_status` by ID, not Kafka.
 - **Kafka** is the delivery mechanism; it is not queried for job status.
+
+**Enqueue invariant**: Enqueue = insert row into `job_status` (status=QUEUED) **then** publish to Kafka. No publish-only enqueues except documented one-off backfills (see Exceptions below). All Kotlin enqueues must use `JobQueue.enqueue()` in `service/core`; Python enqueue sites must insert into `job_status` before producing.
+
+### Exceptions
+
+One-off backfill scripts (`enqueue_embeddings_backfill`, `enqueue_interpret`) insert into `job_status` before publishing to Kafka so that enqueued jobs are visible and the invariant holds. If any script must remain publish-only for operational reasons, document it here and note that those jobs are not user-visible via `GET /jobs/{id}`.
+
+## Schema
+
+**Schema invariant**: Every new or modified table must have a migration in `infra/sql/` (no ad-hoc DDL). New tables in Exposed/code must be created via a migration file.
+
+## Reliability (NFR)
+
+- **Idempotency**: Pipeline stages (ingest, embeddings, astro, fetch-bio, etc.) must be idempotent: reprocessing the same input must not corrupt state (see NFR.md).
+- **Observability**: New pipeline steps must record to `provenance_event` where applicable (see NFR.md and 05-nfr-constraints.mdc).
 
 ## Do NOT
 

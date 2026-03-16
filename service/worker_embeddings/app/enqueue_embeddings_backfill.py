@@ -18,6 +18,7 @@ import time
 import uuid
 
 import psycopg2
+import psycopg2.extras
 from confluent_kafka import Producer
 
 
@@ -59,6 +60,26 @@ def _person_ids_bio_no_embeddings(conn) -> list[str]:
     return [r[0] for r in rows]
 
 
+def _insert_job_status(cur, job: dict) -> None:
+    """Insert a QUEUED row so the job is visible via job_status (architecture invariant)."""
+    cur.execute(
+        """
+        INSERT INTO job_status
+            (id, function, status, args_json, kwargs_json, enqueued_at)
+        VALUES
+            (%s, %s, %s, %s, %s, %s)
+        """,
+        (
+            job["id"],
+            job["function"],
+            job["status"],
+            psycopg2.extras.Json(job.get("args", [])),
+            psycopg2.extras.Json(job.get("kwargs", {})),
+            job["enqueuedAt"],
+        ),
+    )
+
+
 def main(batch_size: int = 500) -> None:
     dsn = _get_dsn()
     if not dsn:
@@ -71,47 +92,50 @@ def main(batch_size: int = 500) -> None:
     conn = psycopg2.connect(dsn)
     try:
         person_ids = _person_ids_bio_no_embeddings(conn)
+        if not person_ids:
+            print("No person_ids with bio_text and missing embeddings. Nothing to enqueue.")
+            return
+
+        scope = "bio_text without embeddings"
+        print(
+            f"Enqueueing embedding jobs for {len(person_ids)} people ({scope}) to topic '{topic}'..."
+        )
+
+        producer = Producer({"bootstrap.servers": kafka_bootstrap, "client.id": "enqueue-embeddings-backfill"})
+        now_ms = int(time.time() * 1000)
+        jobs_enqueued = 0
+        for i in range(0, len(person_ids), batch_size):
+            batch = person_ids[i : i + batch_size]
+            job_id = str(uuid.uuid4())
+            job = {
+                "id": job_id,
+                "function": "embeddings.embed_person_bios",
+                "args": [],
+                "kwargs": {
+                    "person_ids": batch,
+                    "model": model,
+                    "source": "enqueue-embeddings-backfill",
+                },
+                "status": "QUEUED",
+                "enqueuedAt": now_ms,
+                "startedAt": None,
+                "endedAt": None,
+                "result": None,
+                "excInfo": None,
+            }
+            cur = conn.cursor()
+            _insert_job_status(cur, job)
+            conn.commit()
+            cur.close()
+            producer.produce(topic, key=job_id.encode("utf-8"), value=json.dumps(job))
+            jobs_enqueued += 1
+            if jobs_enqueued % 5 == 0 or i + batch_size >= len(person_ids):
+                producer.flush()
+                print(f"  enqueued {min(i + batch_size, len(person_ids))}/{len(person_ids)}")
+        producer.flush()
+        print(f"Done. Enqueued {len(person_ids)} person_ids in {jobs_enqueued} job(s). Ensure embeddings worker is running.")
     finally:
         conn.close()
-
-    if not person_ids:
-        print("No person_ids with bio_text and missing embeddings. Nothing to enqueue.")
-        return
-
-    scope = "bio_text without embeddings"
-    print(
-        f"Enqueueing embedding jobs for {len(person_ids)} people ({scope}) to topic '{topic}'..."
-    )
-
-    producer = Producer({"bootstrap.servers": kafka_bootstrap, "client.id": "enqueue-embeddings-backfill"})
-    now_ms = int(time.time() * 1000)
-    jobs_enqueued = 0
-    for i in range(0, len(person_ids), batch_size):
-        batch = person_ids[i : i + batch_size]
-        job_id = str(uuid.uuid4())
-        job = {
-            "id": job_id,
-            "function": "embeddings.embed_person_bios",
-            "args": [],
-            "kwargs": {
-                "person_ids": batch,
-                "model": model,
-                "source": "enqueue-embeddings-backfill",
-            },
-            "status": "QUEUED",
-            "enqueuedAt": now_ms,
-            "startedAt": None,
-            "endedAt": None,
-            "result": None,
-            "excInfo": None,
-        }
-        producer.produce(topic, key=job_id.encode("utf-8"), value=json.dumps(job))
-        jobs_enqueued += 1
-        if jobs_enqueued % 5 == 0 or i + batch_size >= len(person_ids):
-            producer.flush()
-            print(f"  enqueued {min(i + batch_size, len(person_ids))}/{len(person_ids)}")
-    producer.flush()
-    print(f"Done. Enqueued {len(person_ids)} person_ids in {jobs_enqueued} job(s). Ensure embeddings worker is running.")
 
 
 if __name__ == "__main__":

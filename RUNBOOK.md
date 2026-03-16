@@ -31,6 +31,14 @@ curl http://localhost:8002/healthz
 curl http://localhost:8001/api/tags
 ```
 
+## Architecture invariants and pre-change checklist
+
+See `.cursor/rules/03-architecture-invariants.mdc` for the full list of architecture rules and data-flow invariants. Before making changes that touch the pipeline or schema:
+
+- **Adding a new async job?** Use the shared enqueue path that writes to `job_status` then Kafka (Kotlin: `JobQueue.enqueue()` in `service/core`; Python: insert into `job_status` then produce). Do not publish to Kafka without a corresponding `job_status` row.
+- **Adding a table?** Add a migration in `infra/sql/` and update Exposed table definitions; do not add tables via ad-hoc DDL only. CI runs `scripts/check-schema-migrations.py` to ensure every Exposed table has a migration.
+- **Changing topic or consumer group?** Update ARCHITECTURE.md and 03-architecture-invariants.mdc so the topic table stays accurate.
+
 ## Data Pipeline Workflow
 
 ### Step 1: Ingest Data
